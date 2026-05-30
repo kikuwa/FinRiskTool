@@ -136,6 +136,8 @@ class InspectorEngine:
 
     def _run_rule_check(self, item: Dict, config: Dict) -> Dict:
         """执行规则质检"""
+        enabled_rules = config.get('enabled_rules', [])
+        
         # 构造 RuleBase 需要的输入格式
         rule_input = {
             'meta_prompt': item.get('instruction', ''),
@@ -143,19 +145,21 @@ class InspectorEngine:
             'assistant': item.get('output', ''),
             'file_path': item.get('file_path', ''),
             'ref_answer': item.get('gt', None),
+            'enabled_rules': enabled_rules if enabled_rules else None
         }
         
         rule_result = self.rule_base.run(rule_input)
         
-        # 计算得分 (简单逻辑：通过的规则比例)
-        # 筛选出实际上进行了检查的key (True/False的key)
-        score_keys = [
-            k for k, v in rule_result.items() 
-            if isinstance(v, bool) and k != 'warning'
-        ]
+        # 计算得分：只使用启用的规则
+        rules_to_score = rule_result.get('enabled_rules', [])
+        if not rules_to_score:
+            rules_to_score = [
+                k for k, v in rule_result.items() 
+                if isinstance(v, bool) and k != 'warning'
+            ]
         
-        passed = sum(1 for k in score_keys if rule_result[k])
-        total = len(score_keys)
+        passed = sum(1 for k in rules_to_score if rule_result.get(k, False))
+        total = len(rules_to_score)
         score = (passed / total * 10) if total > 0 else 0
         
         item['score'] = round(score, 2)
