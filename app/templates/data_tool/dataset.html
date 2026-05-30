@@ -13,7 +13,7 @@
 {% endblock %}
 
 {% block content %}
-<div class="max-w-[1200px] mx-auto w-full space-y-8" x-data="datasetApp()">
+<div class="max-w-[1200px] mx-auto w-full space-y-8" x-data="datasetApp()" x-init="init()">
     <div class="flex items-center justify-between">
         <div>
             <h1 class="text-2xl font-bold text-slate-900 tracking-tight">数据集管理</h1>
@@ -70,14 +70,15 @@
 
             <div class="mt-4">
                 <label class="block text-xs font-medium text-slate-700 mb-1">标签列名</label>
-                <input type="text" x-model="labelCol" class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary" placeholder="默认为 label">
+                <input type="text" x-model="labelCol" @change="persistPreferences()"
+                       class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary" placeholder="默认为 label">
             </div>
 
             <!-- 分割按钮 -->
             <div class="mt-4 space-y-3" x-show="files.full">
                 <div>
                     <label class="block text-xs font-medium text-slate-700 mb-1">测试集比例</label>
-                    <select x-model="testSize" class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary">
+                    <select x-model="testSize" @change="persistPreferences()" class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary">
                         <option value="0.1">10%</option>
                         <option value="0.2">20%</option>
                         <option value="0.3">30%</option>
@@ -136,7 +137,8 @@
             
             <div class="mt-4">
                 <label class="block text-xs font-medium text-slate-700 mb-1">标签列名</label>
-                <input type="text" x-model="labelCol" class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary" placeholder="默认为 label">
+                <input type="text" x-model="labelCol" @change="persistPreferences()"
+                       class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary" placeholder="默认为 label">
             </div>
         </div>
 
@@ -184,15 +186,21 @@
             
             <div class="mt-4">
                 <label class="block text-xs font-medium text-slate-700 mb-1">标签列名</label>
-                <input type="text" x-model="labelCol" class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary" placeholder="默认为 label">
+                <input type="text" x-model="labelCol" @change="persistPreferences()"
+                       class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary" placeholder="默认为 label">
             </div>
         </div>
     </div>
     
     <!-- Analysis Result -->
     <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden" x-show="analysisResult" style="display: none;">
-        <div class="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
-            <h3 class="font-bold text-slate-800 text-sm">数据集统计分析</h3>
+        <div class="px-6 py-4 border-b border-slate-100 flex flex-wrap justify-between items-center gap-3 bg-slate-50/50">
+            <div>
+                <h3 class="font-bold text-slate-800 text-sm">数据集统计分析</h3>
+                <p class="text-[10px] text-slate-400 mt-0.5" x-show="reportPath">
+                    报告已保存: <span class="font-mono" x-text="reportPath"></span>
+                </p>
+            </div>
             <button @click="downloadReport" class="text-xs font-bold text-primary hover:text-blue-700 flex items-center gap-1 transition-colors">
                 <span class="material-symbols-outlined text-[16px]">download</span>
                 下载分析报告
@@ -213,7 +221,7 @@
             </div>
             <div class="p-4 bg-slate-50 rounded-xl border border-slate-100">
                 <div class="text-xs text-slate-500 font-bold uppercase tracking-wider mb-1">正负样本比</div>
-                <div class="text-sm font-medium text-slate-600">
+                <div class="text-sm font-medium text-slate-600" x-show="analysisResult?.label_status === 'ok'">
                     <template x-for="(ratio, label) in analysisResult?.label_ratio" :key="label">
                         <div class="flex justify-between">
                             <span x-text="label"></span>
@@ -221,17 +229,79 @@
                         </div>
                     </template>
                 </div>
+                <p class="text-xs text-slate-400 italic" x-show="analysisResult?.label_status !== 'ok'">标签无效</p>
+            </div>
+        </div>
+        <!-- 标签列提示 -->
+        <div class="px-6 pb-4" x-show="analysisResult?.label_status === 'invalid'">
+            <div class="border border-red-200 bg-red-50/80 rounded-xl p-4">
+                <h4 class="text-xs font-bold text-red-800 mb-2 flex items-center gap-1">
+                    <span class="material-symbols-outlined text-[16px]">label_off</span>
+                    标签列未就绪
+                </h4>
+                <p class="text-xs text-red-900/90 mb-3" x-text="analysisResult?.label_hint"></p>
+                <div x-show="(analysisResult?.binary_01_feature_candidates || []).length">
+                    <p class="text-[11px] font-medium text-slate-700 mb-2">以下特征取值仅为 0/1，可作为标签列（点击填入）：</p>
+                    <div class="flex flex-wrap gap-2">
+                        <template x-for="item in analysisResult.binary_01_feature_candidates" :key="item.name">
+                            <button type="button"
+                                    @click="labelCol = item.name; persistPreferences()"
+                                    class="text-xs font-mono px-2.5 py-1.5 rounded-lg border border-red-200 bg-white hover:bg-red-100 text-slate-700 transition-colors"
+                                    :title="JSON.stringify(item.distribution)">
+                                <span x-text="item.name"></span>
+                                <span class="text-slate-400 ml-1" x-text="'(' + item.unique_values.join('/') + ')'"></span>
+                            </button>
+                        </template>
+                    </div>
+                </div>
+                <p class="text-[11px] text-slate-500 mt-2 italic"
+                   x-show="!(analysisResult?.binary_01_feature_candidates || []).length">
+                    未检测到仅含 0/1 的列，请手动确认标签列名是否正确。
+                </p>
+                <p class="text-[11px] text-slate-600 mt-2">选择候选列或修改标签列名后会<strong>自动刷新</strong>分析结果。</p>
+            </div>
+        </div>
+        <!-- 缺失截断 -->
+        <div class="px-6 pb-4" x-show="files.full">
+            <div class="border border-amber-100 bg-amber-50/50 rounded-xl p-4">
+                <h4 class="text-xs font-bold text-amber-800 uppercase mb-2 flex items-center gap-1">
+                    <span class="material-symbols-outlined text-[16px]">content_cut</span>
+                    缺失特征截断
+                </h4>
+                <p class="text-[11px] text-slate-600 mb-3">删除缺失比例<strong>大于</strong>所选阈值的特征列，并更新 <code class="font-mono text-[10px]">full_dataset.csv</code> 与 <code class="font-mono text-[10px]">dataset_analysis_report.json</code></p>
+                <div class="flex flex-wrap items-end gap-3">
+                    <div class="min-w-[140px]">
+                        <label class="block text-xs font-medium text-slate-700 mb-1">缺失比例上限</label>
+                        <select x-model="missingThresholdPct" class="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-primary">
+                            <option value="50">50%（删除缺失 &gt;50%）</option>
+                            <option value="60">60%</option>
+                            <option value="70">70%</option>
+                            <option value="80">80%</option>
+                            <option value="90">90%</option>
+                            <option value="100">100%（仅删除全空列）</option>
+                        </select>
+                    </div>
+                    <button @click="applyMissingThreshold" :disabled="cleaningMissing"
+                            class="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white text-sm font-bold rounded-lg disabled:opacity-50 flex items-center gap-2">
+                        <span class="material-symbols-outlined text-[18px]" :class="{'animate-spin': cleaningMissing}">filter_alt</span>
+                        <span x-text="cleaningMissing ? '处理中...' : '应用截断'"></span>
+                    </button>
+                </div>
+                <p class="text-[10px] text-slate-500 mt-2" x-show="analysisResult?.missing_threshold_applied_pct">
+                    上次已应用阈值: <span class="font-bold" x-text="analysisResult?.missing_threshold_applied_pct"></span>
+                    <span x-show="lastDroppedCount > 0">，删除 <span x-text="lastDroppedCount"></span> 列</span>
+                </p>
             </div>
         </div>
         <div class="px-6 pb-6 grid grid-cols-1 md:grid-cols-2 gap-6">
             <!-- Top Missing -->
             <div class="border border-slate-100 rounded-xl p-4">
-                <h4 class="text-xs font-bold text-slate-500 uppercase mb-3">缺失值 Top 5</h4>
+                <h4 class="text-xs font-bold text-slate-500 uppercase mb-3">缺失值 Top 5（数量 / 比例）</h4>
                 <div class="space-y-2">
-                    <template x-for="(count, feature) in analysisResult?.top_missing_features" :key="feature">
-                        <div class="flex justify-between text-xs">
-                            <span class="text-slate-600 font-mono" x-text="feature"></span>
-                            <span class="text-slate-400" x-text="count"></span>
+                    <template x-for="(info, feature) in analysisResult?.top_missing_features" :key="feature">
+                        <div class="flex justify-between text-xs gap-2">
+                            <span class="text-slate-600 font-mono truncate" x-text="feature"></span>
+                            <span class="text-slate-400 whitespace-nowrap font-mono" x-text="info.count + ' · ' + info.ratio_pct"></span>
                         </div>
                     </template>
                     <div x-show="Object.keys(analysisResult?.top_missing_features || {}).length === 0" class="text-xs text-slate-400 italic">无缺失值</div>
@@ -306,6 +376,124 @@
             previewData: [],
             previewColumns: [],
             analysisResult: null,
+            reportPath: '',
+            missingThresholdPct: '70',
+            cleaningMissing: false,
+            lastDroppedCount: 0,
+            statusLoading: false,
+
+            init() {
+                this.loadStatusFromServer();
+                window.addEventListener('pageshow', (event) => {
+                    if (event.persisted) {
+                        this.loadStatusFromServer();
+                    }
+                });
+            },
+
+            _clearLocalState() {
+                this.files = { full: '', train: '', test: '' };
+                this.previewData = [];
+                this.previewColumns = [];
+                this.analysisResult = null;
+                this.reportPath = '';
+                this.lastDroppedCount = 0;
+                this.missingThresholdPct = '70';
+                this.labelCol = 'label';
+                this.testSize = '0.3';
+                if (this.$refs.fullInput) this.$refs.fullInput.value = '';
+                if (this.$refs.trainInput) this.$refs.trainInput.value = '';
+                if (this.$refs.testInput) this.$refs.testInput.value = '';
+            },
+
+            async persistPreferences() {
+                const prevStatus = this.analysisResult?.label_status;
+                try {
+                    const res = await fetch('{{ url_for("data_tool.update_dataset_preferences") }}', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            label_col: this.labelCol || 'label',
+                            test_size: parseFloat(this.testSize) || 0.3
+                        })
+                    });
+                    const data = await res.json();
+                    if (!data.success) {
+                        throw new Error(data.error || '保存偏好失败');
+                    }
+                    if (data.label_col) {
+                        this.labelCol = data.label_col;
+                    }
+                    if (data.test_size !== undefined && data.test_size !== null) {
+                        this.testSize = String(data.test_size);
+                    }
+                    if (data.analysis) {
+                        this._applyAnalysisResponse(data, {
+                            silent: prevStatus === 'invalid' && data.analysis.label_status === 'ok',
+                        });
+                        if (prevStatus === 'invalid' && data.analysis.label_status === 'ok') {
+                            window.dispatchEvent(new CustomEvent('notify', {
+                                detail: { message: '标签列已更新，分析结果已刷新', type: 'success' }
+                            }));
+                        }
+                    }
+                } catch (e) {
+                    console.warn('persistPreferences:', e);
+                }
+            },
+
+            async loadStatusFromServer() {
+                this.statusLoading = true;
+                try {
+                    const res = await fetch('{{ url_for("data_tool.dataset_status") }}');
+                    const data = await res.json();
+                    if (!data.success) {
+                        throw new Error(data.error || '加载状态失败');
+                    }
+                    if (data.label_col) {
+                        this.labelCol = data.label_col;
+                    }
+                    if (data.test_size !== undefined && data.test_size !== null) {
+                        this.testSize = String(data.test_size);
+                    }
+                    this.files = data.files || { full: '', train: '', test: '' };
+                    if (data.preview?.length) {
+                        this.previewData = data.preview;
+                        this.previewColumns = data.columns || Object.keys(data.preview[0]);
+                    } else {
+                        this.previewData = [];
+                        this.previewColumns = data.columns || [];
+                    }
+                    this.analysisResult = data.analysis || null;
+                    this.reportPath = data.report_path || '';
+                } catch (e) {
+                    console.warn('loadStatusFromServer:', e);
+                } finally {
+                    this.statusLoading = false;
+                }
+            },
+
+            _applyAnalysisResponse(data, options = {}) {
+                const silent = options.silent === true;
+                if (data.analysis) this.analysisResult = data.analysis;
+                if (data.report_path) this.reportPath = data.report_path;
+                if (!silent && data.analysis?.label_status === 'invalid') {
+                    const names = data.analysis.binary_01_feature_names || [];
+                    const hint = data.analysis.label_hint || '请设置标签列';
+                    const extra = names.length
+                        ? `可选 0/1 列：${names.join('、')}`
+                        : '未检测到 0/1 候选列';
+                    window.dispatchEvent(new CustomEvent('notify', {
+                        detail: { message: `${hint} ${extra}`, type: 'warning' }
+                    }));
+                }
+                if (data.preview && data.preview.length > 0) {
+                    this.previewData = data.preview;
+                    this.previewColumns = data.columns || Object.keys(data.preview[0]);
+                } else if (data.columns) {
+                    this.previewColumns = data.columns;
+                }
+            },
             
             handleFileSelect(event, type) {
                 const file = event.target.files[0];
@@ -344,13 +532,7 @@
                     
                     if (data.success) {
                         this.files[type] = file.name;
-                        if (data.preview && data.preview.length > 0) {
-                            this.previewData = data.preview;
-                            this.previewColumns = data.columns || Object.keys(data.preview[0]);
-                        }
-                        if (data.analysis) {
-                            this.analysisResult = data.analysis;
-                        }
+                        this._applyAnalysisResponse(data);
                         window.dispatchEvent(new CustomEvent('notify', { detail: { message: '文件上传成功', type: 'success' } }));
                     } else {
                         throw new Error(data.error);
@@ -387,8 +569,11 @@
                     if (data.success) {
                         this.files.train = 'train_dataset.csv';
                         this.files.test = 'test_dataset.csv';
-                        this.analysisResult = data.analysis;
+                        this._applyAnalysisResponse(data);
                         window.dispatchEvent(new CustomEvent('notify', { detail: { message: '数据集分割成功', type: 'success' } }));
+                        if (data.warning) {
+                            window.dispatchEvent(new CustomEvent('notify', { detail: { message: data.warning, type: 'warning' } }));
+                        }
                     } else {
                         throw new Error(data.error);
                     }
@@ -396,6 +581,38 @@
                     window.dispatchEvent(new CustomEvent('notify', { detail: { message: e.message || '分割失败', type: 'error' } }));
                 } finally {
                     this.splitting = false;
+                }
+            },
+
+            async applyMissingThreshold() {
+                if (!this.files.full) {
+                    window.dispatchEvent(new CustomEvent('notify', { detail: { message: '请先上传全量数据集', type: 'warning' } }));
+                    return;
+                }
+                this.cleaningMissing = true;
+                try {
+                    const res = await fetch('{{ url_for("data_tool.apply_missing_threshold") }}', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            label_col: this.labelCol || 'label',
+                            missing_threshold_pct: parseFloat(this.missingThresholdPct)
+                        })
+                    });
+                    const data = await res.json();
+                    if (data.success) {
+                        this._applyAnalysisResponse(data);
+                        this.lastDroppedCount = (data.dropped_features || []).length;
+                        window.dispatchEvent(new CustomEvent('notify', {
+                            detail: { message: data.message || '缺失截断完成', type: 'success' }
+                        }));
+                    } else {
+                        throw new Error(data.error);
+                    }
+                } catch (e) {
+                    window.dispatchEvent(new CustomEvent('notify', { detail: { message: e.message || '截断失败', type: 'error' } }));
+                } finally {
+                    this.cleaningMissing = false;
                 }
             },
 
@@ -431,24 +648,25 @@
                 }
             },
 
-            resetState() {
-                this.files = {
-                    full: '',
-                    train: '',
-                    test: ''
-                };
-                this.previewData = [];
-                this.previewColumns = [];
-                this.analysisResult = null;
-                this.labelCol = 'label';
-                this.testSize = '0.3';
-                
-                // Reset file inputs
-                this.$refs.fullInput.value = '';
-                this.$refs.trainInput.value = '';
-                this.$refs.testInput.value = '';
-                
-                window.dispatchEvent(new CustomEvent('notify', { detail: { message: '状态已重置', type: 'info' } }));
+            async resetState() {
+                try {
+                    const res = await fetch('{{ url_for("data_tool.clear_dataset") }}', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' }
+                    });
+                    const data = await res.json();
+                    if (!data.success) {
+                        throw new Error(data.error || '清空失败');
+                    }
+                    this._clearLocalState();
+                    window.dispatchEvent(new CustomEvent('notify', {
+                        detail: { message: '已清空数据集与分析报告', type: 'info' }
+                    }));
+                } catch (e) {
+                    window.dispatchEvent(new CustomEvent('notify', {
+                        detail: { message: e.message || '重置失败', type: 'error' }
+                    }));
+                }
             }
         }
     }
