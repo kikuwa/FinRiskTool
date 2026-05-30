@@ -191,44 +191,52 @@ def _detect_encoding(file_path: str) -> str:
         result = chardet.detect(f.read(100000))
     return result['encoding']
 
+
+def _csv_encoding_candidates(file_path: str) -> list:
+    detected_encoding = _detect_encoding(file_path)
+    encodings_to_try = []
+    if detected_encoding:
+        encodings_to_try.append(detected_encoding)
+    for enc in ('utf-8', 'gbk', 'gb18030', 'big5', 'latin-1', 'utf-16', 'cp1252'):
+        if enc not in encodings_to_try:
+            encodings_to_try.append(enc)
+    return encodings_to_try
+
+
+def _read_csv_with_encodings(file_path: str, **read_csv_kwargs) -> pd.DataFrame:
+    encodings_to_try = _csv_encoding_candidates(file_path)
+    last_error = None
+    for encoding in encodings_to_try:
+        try:
+            return pd.read_csv(file_path, encoding=encoding, low_memory=False, **read_csv_kwargs)
+        except (UnicodeDecodeError, LookupError) as e:
+            last_error = e
+            continue
+    try:
+        return pd.read_csv(
+            file_path, encoding='utf-8', errors='replace', low_memory=False, **read_csv_kwargs,
+        )
+    except Exception as e:
+        raise ValueError(
+            f"无法读取文件。尝试了以下编码: {encodings_to_try}。错误: {last_error or e}"
+        ) from e
+
+
+def _load_csv_preview(file_path: str, nrows: int = 5) -> pd.DataFrame:
+    return _read_csv_with_encodings(file_path, nrows=nrows)
+
+
+def _read_csv_column_names(file_path: str) -> list:
+    return _read_csv_with_encodings(file_path, nrows=0).columns.tolist()
+
+
 def _load_csv_robust(file_path: str) -> pd.DataFrame:
     """
     加载 CSV 文件，自动检测编码并包含多种编码回退机制
     """
     if not os.path.exists(file_path):
         raise FileNotFoundError(f"文件未找到: {file_path}")
-    
-    detected_encoding = _detect_encoding(file_path)
-    encodings_to_try = []
-    if detected_encoding:
-        encodings_to_try.append(detected_encoding)
-    
-    common_encodings = [
-        'utf-8',
-        'gbk',
-        'gb18030',
-        'big5',
-        'latin-1',
-        'utf-16',
-        'cp1252'
-    ]
-    
-    for enc in common_encodings:
-        if enc not in encodings_to_try:
-            encodings_to_try.append(enc)
-    
-    last_error = None
-    for encoding in encodings_to_try:
-        try:
-            return pd.read_csv(file_path, encoding=encoding, low_memory=False)
-        except (UnicodeDecodeError, LookupError) as e:
-            last_error = e
-            continue
-    
-    try:
-        return pd.read_csv(file_path, encoding='utf-8', errors='replace', low_memory=False)
-    except Exception as e:
-        raise ValueError(f"无法读取文件。尝试了以下编码: {encodings_to_try}。错误: {last_error}")
+    return _read_csv_with_encodings(file_path)
 
 data_tool_bp = Blueprint('data_tool', __name__)
 
@@ -352,16 +360,20 @@ def dataset_status():
         report_path = None
 
         if os.path.isfile(paths['full']):
-            df = _load_csv_robust(paths['full'])
-            preview = df.head(5).fillna('').to_dict('records')
-            columns = df.columns.tolist()
+            preview_df = _load_csv_preview(paths['full'], nrows=5)
+            preview = preview_df.fillna('').to_dict('records')
+            columns = _read_csv_column_names(paths['full'])
+
+            needs_analysis = True
             if os.path.isfile(paths['report']):
                 with open(paths['report'], 'r', encoding='utf-8') as f:
                     analysis = json.load(f)
                 report_path = paths['report']
-                if analysis.get('label_col_requested') != label_col:
-                    analysis, report_path = _analyze_and_persist(df, label_col, project_root)
-            else:
+                if analysis.get('label_col_requested') == label_col:
+                    needs_analysis = False
+
+            if needs_analysis:
+                df = _load_csv_robust(paths['full'])
                 analysis, report_path = _analyze_and_persist(df, label_col, project_root)
 
         return jsonify({
