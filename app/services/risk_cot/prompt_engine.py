@@ -229,6 +229,21 @@ class PromptEngine:
         )
         
         try:
+            # 检查模板所需的字段是否都存在
+            template_vars = set()
+            for template in [cls.INPUT_DATA_TEMPLATE, instruction_template]:
+                import re
+                vars_found = re.findall(r'\{(\w+)\}', template)
+                template_vars.update(vars_found)
+            
+            missing_vars = [v for v in template_vars if v not in data_dict]
+            if missing_vars:
+                import logging
+                logging.warning(f"数据缺少模板所需字段: {missing_vars}")
+                # 用"未知"填充缺失字段
+                for var in missing_vars:
+                    data_dict[var] = "未知"
+            
             input_content = cls.INPUT_DATA_TEMPLATE.format(**data_dict)
             instruction_content = instruction_template.format(**data_dict)
             
@@ -243,5 +258,6 @@ class PromptEngine:
                 "gt": gt_value
             }
         except Exception as e:
-            # logger.warning(f"构建 Alpaca 数据失败: {e}")
+            import logging
+            logging.error(f"构建 Alpaca 数据失败: {e}", exc_info=True)
             return None
