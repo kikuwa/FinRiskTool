@@ -14,14 +14,18 @@
 
 {% block content %}
 <div class="max-w-[1200px] mx-auto w-full space-y-8" x-data="datasetApp()" x-init="init()">
+    <div x-show="statusLoading" style="display: none;" class="flex items-center gap-2 text-sm text-slate-500">
+        <div class="size-4 border-2 border-slate-200 border-t-primary rounded-full animate-spin"></div>
+        <span>正在同步数据集状态…</span>
+    </div>
     <div class="flex items-center justify-between">
         <div>
             <h1 class="text-2xl font-bold text-slate-900 tracking-tight">数据集管理</h1>
             <p class="text-slate-500 text-sm mt-1">管理模型训练所需的原始数据与中间结果</p>
         </div>
-        <button @click="resetState" class="px-4 py-2 bg-white border border-slate-200 text-slate-600 text-sm font-medium rounded-lg hover:bg-slate-50 transition-colors flex items-center gap-2">
-            <span class="material-symbols-outlined text-[18px]">refresh</span>
-            刷新状态
+        <button @click="loadStatusFromServer()" class="px-4 py-2 bg-white border border-slate-200 text-slate-600 text-sm font-medium rounded-lg hover:bg-slate-50 transition-colors flex items-center gap-2">
+            <span class="material-symbols-outlined text-[18px]" :class="{'animate-spin': statusLoading}">refresh</span>
+            <span x-text="statusLoading ? '刷新中...' : '刷新状态'"></span>
         </button>
     </div>
 
@@ -54,7 +58,7 @@
                     </button>
                 </div>
                 
-                <div x-show="uploading.full" class="absolute inset-0 flex flex-col items-center justify-center bg-white/90 rounded-xl z-10">
+                <div x-show="uploading.full" style="display: none;" class="absolute inset-0 flex flex-col items-center justify-center bg-white/90 rounded-xl z-10">
                     <div class="size-10 border-4 border-slate-200 border-t-primary rounded-full animate-spin mb-3"></div>
                     <p class="text-primary font-bold text-sm">正在上传...</p>
                 </div>
@@ -121,7 +125,7 @@
                     </button>
                 </div>
                 
-                <div x-show="uploading.train" class="absolute inset-0 flex flex-col items-center justify-center bg-white/90 rounded-xl z-10">
+                <div x-show="uploading.train" style="display: none;" class="absolute inset-0 flex flex-col items-center justify-center bg-white/90 rounded-xl z-10">
                     <div class="size-10 border-4 border-slate-200 border-t-green-500 rounded-full animate-spin mb-3"></div>
                     <p class="text-green-600 font-bold text-sm">正在上传...</p>
                 </div>
@@ -170,7 +174,7 @@
                     </button>
                 </div>
                 
-                <div x-show="uploading.test" class="absolute inset-0 flex flex-col items-center justify-center bg-white/90 rounded-xl z-10">
+                <div x-show="uploading.test" style="display: none;" class="absolute inset-0 flex flex-col items-center justify-center bg-white/90 rounded-xl z-10">
                     <div class="size-10 border-4 border-slate-200 border-t-purple-500 rounded-full animate-spin mb-3"></div>
                     <p class="text-purple-600 font-bold text-sm">正在上传...</p>
                 </div>
@@ -444,8 +448,12 @@
 
             async loadStatusFromServer() {
                 this.statusLoading = true;
+                const controller = new AbortController();
+                const timer = setTimeout(() => controller.abort(), 120000);
                 try {
-                    const res = await fetch('{{ url_for("data_tool.dataset_status") }}');
+                    const res = await fetch('{{ url_for("data_tool.dataset_status") }}', {
+                        signal: controller.signal,
+                    });
                     const data = await res.json();
                     if (!data.success) {
                         throw new Error(data.error || '加载状态失败');
@@ -467,8 +475,15 @@
                     this.analysisResult = data.analysis || null;
                     this.reportPath = data.report_path || '';
                 } catch (e) {
+                    const msg = e.name === 'AbortError'
+                        ? '加载数据集状态超时，大文件首次分析可能较慢，请稍后点击「刷新状态」'
+                        : (e.message || '加载数据集状态失败');
                     console.warn('loadStatusFromServer:', e);
+                    window.dispatchEvent(new CustomEvent('notify', {
+                        detail: { message: msg, type: 'error' }
+                    }));
                 } finally {
+                    clearTimeout(timer);
                     this.statusLoading = false;
                 }
             },
