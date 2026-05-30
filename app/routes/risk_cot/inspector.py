@@ -60,8 +60,10 @@ def run_inspection():
             else:
                 return jsonify({'status': 'error', 'message': 'Input file not found'}), 404
             
-        # Generate output filename
-        base_name = os.path.basename(input_file).replace('.jsonl', '')
+        # Generate output filename - properly handle edge cases
+        base_name = os.path.splitext(os.path.basename(input_file))[0]
+        # Clean up any trailing special characters
+        base_name = base_name.rstrip('-_. ')
         inspection_type = data.get('type', 'rule')
         output_file = os.path.join(current_app.config['RESULTS_FOLDER'], f"{base_name}_{inspection_type}_inspected.jsonl")
         
