@@ -1,4 +1,3 @@
-from .data_factory import RiskDataFactory
 from .prompt_engine import PromptEngine
 from .inference_engine import InferenceEngine
 from .inspector_engine import InspectorEngine
