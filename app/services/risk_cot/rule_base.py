@@ -77,8 +77,21 @@ class RuleBase:
         assistant_content = str(input_data.get('assistant', ''))
         self.file_path = input_data.get('file_path', '')
         ref_answer = input_data.get('ref_answer', None)
+        enabled_rules = input_data.get('enabled_rules', None)
 
-        # 初始化结果字典（True 表示通过）
+        all_rules = [
+            'is_number', 'no_text_truncated', 'no_incomplete_content',
+            'no_chinese_english_mix', 'no_repeat_content', 'no_unclose_paire',
+            'no_repeat_pattern', 'no_crashed_str', 'no_chinese_English_space',
+            'no_other_gpt_keywords', 'no_think', 'all_math_answer_equal',
+            'fk_answer_exist', 'fk_answer_yes_or_no', 'fk_answer_equal'
+        ]
+
+        if enabled_rules:
+            rules_to_check = [r for r in all_rules if r in enabled_rules]
+        else:
+            rules_to_check = all_rules
+
         self.result = {
             'is_number': True,
             'no_text_truncated': True,
@@ -96,7 +109,8 @@ class RuleBase:
             'fk_answer_yes_or_no': True,
             'fk_answer_equal': True,
             'warning': '',
-            'assistant_content': assistant_content
+            'assistant_content': assistant_content,
+            'enabled_rules': rules_to_check
         }
         self.warning_process = []
 
@@ -126,6 +140,8 @@ class RuleBase:
         ]
 
         for key, check_func, warning_msg in checks:
+            if key not in rules_to_check:
+                continue
             try:
                 if not check_func():
                     self.result[key] = False
@@ -141,16 +157,17 @@ class RuleBase:
                 return self.result
 
         # === 特殊检查：慢思考（不中断后续）===
-        try:
-            if self._check_think():
+        if 'no_think' in rules_to_check:
+            try:
+                if self._check_think():
+                    self.result['no_think'] = False
+                    self.warning_process.append('no_think')
+            except Exception:
                 self.result['no_think'] = False
-                self.warning_process.append('no_think')
-        except Exception:
-            self.result['no_think'] = False
-            self.warning_process.append('no_think_exception')
+                self.warning_process.append('no_think_exception')
 
-        # === 数学答案检查（仅 math 文件）===
-        if self._is_math_task():
+        # === 数学答案检查（仅 math 文件且规则启用）===
+        if self._is_math_task() and 'all_math_answer_equal' in rules_to_check:
             try:
                 if not self._check_math_answer():
                     self.result['all_math_answer_equal'] = False
@@ -163,32 +180,34 @@ class RuleBase:
                 self.result['warning'] = '; '.join(self.warning_process)
                 return self.result
 
-        # === 金融风控检查（非 math/code）===
+        # === 金融风控检查（非 math/code 且规则启用）===
         is_fk_task = not self._is_math_task() and not self._is_code_task()
         if is_fk_task:
-            try:
-                if not self._check_fk_yes_no():
+            if 'fk_answer_yes_or_no' in rules_to_check:
+                try:
+                    if not self._check_fk_yes_no():
+                        self.result['fk_answer_yes_or_no'] = False
+                        self.warning_process.append('fk_not_answer_yes_or_no')
+                        self.result['warning'] = '; '.join(self.warning_process)
+                        return self.result
+                except Exception:
                     self.result['fk_answer_yes_or_no'] = False
-                    self.warning_process.append('fk_not_answer_yes_or_no')
+                    self.warning_process.append('fk_yes_no_exception')
                     self.result['warning'] = '; '.join(self.warning_process)
                     return self.result
-            except Exception:
-                self.result['fk_answer_yes_or_no'] = False
-                self.warning_process.append('fk_yes_no_exception')
-                self.result['warning'] = '; '.join(self.warning_process)
-                return self.result
 
-            try:
-                if not self._check_fk_answer_equal():
+            if 'fk_answer_equal' in rules_to_check:
+                try:
+                    if not self._check_fk_answer_equal():
+                        self.result['fk_answer_equal'] = False
+                        self.warning_process.append('fk_answer_not_equal')
+                        self.result['warning'] = '; '.join(self.warning_process)
+                        return self.result
+                except Exception:
                     self.result['fk_answer_equal'] = False
-                    self.warning_process.append('fk_answer_not_equal')
+                    self.warning_process.append('fk_answer_equal_exception')
                     self.result['warning'] = '; '.join(self.warning_process)
                     return self.result
-            except Exception:
-                self.result['fk_answer_equal'] = False
-                self.warning_process.append('fk_answer_equal_exception')
-                self.result['warning'] = '; '.join(self.warning_process)
-                return self.result
 
         self.result['warning'] = '; '.join(self.warning_process)
         return self.result
