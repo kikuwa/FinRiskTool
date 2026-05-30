@@ -107,8 +107,10 @@
         .custom-scrollbar::-webkit-scrollbar-thumb:hover {
             background: rgba(100, 116, 139, 0.8);
         }
+        /* Alpine 未就绪前隐藏 x-show 元素，避免上传区转圈层默认露出 */
+        [x-cloak] { display: none !important; }
     </style>
-    <script src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
+    <script src="{{ url_for('static', filename='js/alpine.min.js') }}" defer></script>
 </head>
 <body class="h-screen overflow-hidden" x-data="{ notifications: [] }" @notify.window="notifications.push($event.detail); setTimeout(() => notifications.shift(), 3000)">
 <div class="flex h-full">
