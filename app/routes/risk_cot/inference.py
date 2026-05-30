@@ -4,6 +4,7 @@ import threading
 import os
 import json
 import time
+import traceback
 
 from werkzeug.utils import secure_filename
 
@@ -35,12 +36,19 @@ def upload_file():
             })
             
     except Exception as e:
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        error_traceback = traceback.format_exc()
+        current_app.logger.error(f"Error in upload_file: {str(e)}")
+        current_app.logger.error(error_traceback)
+        return jsonify({'status': 'error', 'message': str(e), 'traceback': error_traceback}), 500
 
 @inference_bp.route('/run', methods=['POST'])
 def run_inference():
     try:
-        data = request.json
+        # Safely get JSON data
+        data = request.get_json(silent=True) or {}
+        
+        current_app.logger.info(f"Received inference request with data: {data}")
+        
         input_file = data.get('input_file')
         api_key = data.get('api_key')
         
@@ -54,8 +62,10 @@ def run_inference():
         if not os.path.exists(input_file):
             return jsonify({'status': 'error', 'message': 'Input file not found'}), 404
             
-        # Generate output filename
-        base_name = os.path.basename(input_file).replace('.jsonl', '')
+        # Generate output filename - properly handle edge cases
+        base_name = os.path.splitext(os.path.basename(input_file))[0]
+        # Clean up any trailing special characters
+        base_name = base_name.rstrip('-_. ')
         output_file = os.path.join(current_app.config['RESULTS_FOLDER'], f"{base_name}_inference_result.jsonl")
         
         config = {
@@ -84,7 +94,10 @@ def run_inference():
         })
         
     except Exception as e:
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        error_traceback = traceback.format_exc()
+        current_app.logger.error(f"Error in run_inference: {str(e)}")
+        current_app.logger.error(error_traceback)
+        return jsonify({'status': 'error', 'message': str(e), 'traceback': error_traceback}), 500
 
 @inference_bp.route('/stop', methods=['POST'])
 def stop_inference():
@@ -92,7 +105,10 @@ def stop_inference():
         inference_engine.stop()
         return jsonify({'status': 'success', 'message': 'Stop signal sent'})
     except Exception as e:
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        error_traceback = traceback.format_exc()
+        current_app.logger.error(f"Error in stop_inference: {str(e)}")
+        current_app.logger.error(error_traceback)
+        return jsonify({'status': 'error', 'message': str(e), 'traceback': error_traceback}), 500
 
 @inference_bp.route('/status')
 def stream_status():
@@ -100,8 +116,6 @@ def stream_status():
         while True:
             status = inference_engine.get_status()
             yield f"data: {json.dumps(status)}\n\n"
-            if status['status'] in ['completed', 'stopped', 'error']:
-                break
             time.sleep(1)
-    
+            
     return Response(generate(), mimetype='text/event-stream')
