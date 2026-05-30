@@ -25,19 +25,21 @@
             </div>
             <h1 class="text-3xl font-bold text-slate-900 mb-4">AutoML 自动化特征筛选</h1>
             <p class="text-slate-500 max-w-2xl leading-relaxed text-sm">
-                采用多策略集成学习框架，深度融合互信息 (Mutual Information)、XGBoost 增益与 Random Forest 基尼指数。
-                自动化识别与剔除冗余特征，精准定位关键风险因子，为下游模型构建提供高质量特征子集。
+                基于 PU 训练先验构建 PN 样本，经 MI 双阶段剔除与 LightGBM 三次稳定性实验筛选特征；
+                业务可勾选确认后，再运行 MLBase 全量 vs Top 特征对比（召回≥50% 下最大化精度）。
             </p>
         </div>
 
-        <div class="mt-8 flex items-center gap-4">
-            <button @click="runFeatureSelection" 
-                    :disabled="loading"
-                    class="px-8 py-3 bg-cyan-600 text-white text-sm font-bold rounded-xl hover:bg-cyan-700 transition-all shadow-lg shadow-cyan-200 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed transform active:scale-[0.98]">
-                <span class="material-symbols-outlined text-[20px]" :class="{'animate-spin': loading}" x-text="loading ? 'sync' : 'play_arrow'"></span>
-                <span x-text="loading ? '正在进行特征筛选...' : '开始特征筛选'"></span>
-            </button>
-            
+        <div class="mt-6 flex flex-wrap items-end gap-4">
+            <div class="space-y-1.5">
+                <label class="block text-xs text-slate-500 font-medium">标签列（与 PU 训练同步）</label>
+                <input type="text" x-model="labelCol" readonly
+                       class="w-40 px-3 py-2 text-sm font-mono text-slate-600 bg-slate-100 border border-slate-200 rounded-lg cursor-default"
+                       placeholder="label">
+                <div class="text-[10px] text-slate-400">完成 PU 训练后自动读取</div>
+            </div>
+        </div>
+        <div class="mt-4 flex flex-wrap items-center gap-4">
             <div class="relative">
                 <input type="file" x-ref="fileInput" accept=".csv" class="hidden" @change="handleFileSelect($event)">
                 <button @click="$refs.fileInput.click()" 
@@ -57,21 +59,296 @@
         </div>
     </div>
 
+    <!-- 共享 LLM 配置 -->
+    <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
+        <h2 class="text-sm font-bold text-slate-800 mb-4 flex items-center gap-2">
+            <span class="material-symbols-outlined text-slate-500 text-[18px]">key</span>
+            LLM 配置（共用）
+        </h2>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+                <label class="block text-xs font-bold text-slate-500 mb-2">API Key</label>
+                <input type="password" x-model="apiKey" @input="persistLlmConfig" @change="persistLlmConfig"
+                       class="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-cyan-500/20 focus:border-cyan-500 outline-none text-sm font-mono" placeholder="sk-...">
+            </div>
+            <div>
+                <label class="block text-xs font-bold text-slate-500 mb-2">Model</label>
+                <input type="text" x-model="modelName" @input="persistLlmConfig" @change="persistLlmConfig"
+                       class="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-cyan-500/20 focus:border-cyan-500 outline-none text-sm font-mono" placeholder="gpt-4o-mini / deepseek-chat">
+            </div>
+        </div>
+        <div class="mt-4">
+            <label class="block text-xs font-bold text-slate-500 mb-2">API Base URL <span class="text-[10px] text-slate-400 font-normal">(可选)</span></label>
+            <input type="text" x-model="apiBase" @input="persistLlmConfig" @change="persistLlmConfig"
+                   class="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-cyan-500/20 focus:border-cyan-500 outline-none text-sm font-mono" placeholder="https://api.deepseek.com/v1">
+        </div>
+        <p class="text-[10px] text-slate-400 mt-3">与 PU 学习页共用本地缓存；同一轮 run.py 进程内可复用。重启 run.py 后会自动清空 API Key 与 URL。</p>
+    </div>
+
+    <!-- 阶段 1：特征选择参数（确认特征后隐藏） -->
+    <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden" x-show="!featuresConfirmed" x-cloak>
+        <div class="px-6 py-4 border-b border-slate-100 bg-slate-50/50">
+            <div class="flex items-center gap-2">
+                <span class="material-symbols-outlined text-cyan-500 text-[18px]">filter_alt</span>
+                <span class="text-sm font-bold text-slate-700">阶段 1 · 特征选择参数</span>
+            </div>
+        </div>
+        <div class="p-6 space-y-6">
+            <div class="rounded-xl border border-amber-100 bg-amber-50/50 p-4 space-y-4">
+                <div class="flex items-center gap-2">
+                    <span class="material-symbols-outlined text-amber-600 text-[16px]">person</span>
+                    <span class="text-xs font-bold text-amber-800">用户设定 · AI 不会修改</span>
+                </div>
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <div class="space-y-1.5">
+                        <label class="block text-xs text-amber-900/70 font-medium">预估正样本比例 (%)</label>
+                        <input type="number" x-model.number="estimatedRatePct" min="0.1" max="50" step="0.1"
+                               class="w-full px-3 py-2 text-sm font-mono text-slate-700 bg-white border border-amber-200 rounded-lg focus:ring-2 focus:ring-amber-500/20 focus:border-amber-400 outline-none">
+                        <div class="text-[10px] text-amber-700/60">PN 构建时删 U 比例先验；与 PU 会话同步</div>
+                    </div>
+                    <div class="space-y-1.5">
+                        <label class="block text-xs text-amber-900/70 font-medium">MI 特征数阈值</label>
+                        <input type="number" x-model.number="miFeatureThreshold" min="10" max="500" step="1"
+                               class="w-full px-3 py-2 text-sm font-mono text-slate-700 bg-white border border-amber-200 rounded-lg focus:ring-2 focus:ring-amber-500/20 focus:border-amber-400 outline-none">
+                        <div class="text-[10px] text-amber-700/60">超过则启用双阶段 MI 剔除</div>
+                    </div>
+                    <div class="space-y-1.5">
+                        <label class="block text-xs text-amber-900/70 font-medium">稳定性 TopK</label>
+                        <input type="number" x-model.number="stabilityTopK" min="10" max="200" step="1"
+                               class="w-full px-3 py-2 text-sm font-mono text-slate-700 bg-white border border-amber-200 rounded-lg focus:ring-2 focus:ring-amber-500/20 focus:border-amber-400 outline-none">
+                        <div class="text-[10px] text-amber-700/60">每轮 LGB 保留重要性前 K</div>
+                    </div>
+                    <div class="space-y-1.5">
+                        <label class="block text-xs text-amber-900/70 font-medium">稳定性最少命中</label>
+                        <input type="number" x-model.number="stabilityMinHits" min="1" max="3" step="1"
+                               class="w-full px-3 py-2 text-sm font-mono text-slate-700 bg-white border border-amber-200 rounded-lg focus:ring-2 focus:ring-amber-500/20 focus:border-amber-400 outline-none">
+                        <div class="text-[10px] text-amber-700/60">3 次实验中至少命中次数</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="rounded-xl border border-cyan-100 bg-cyan-50/30 p-4 space-y-4">
+                <div class="flex items-center gap-2">
+                    <span class="material-symbols-outlined text-cyan-600 text-[16px]">tune</span>
+                    <span class="text-xs font-bold text-cyan-800">模型超参 · AI 可推荐</span>
+                </div>
+                <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
+                    <div class="space-y-1.5">
+                        <label class="block text-xs text-slate-500 font-medium">RUS 少数/多数比</label>
+                        <input type="number" x-model.number="stabilityRusRatio" min="0.05" max="0.5" step="0.01"
+                               class="w-full px-3 py-2 text-sm font-mono text-slate-700 bg-white border border-cyan-200 rounded-lg focus:ring-2 focus:ring-cyan-500/20 focus:border-cyan-500 outline-none">
+                    </div>
+                    <div class="space-y-1.5">
+                        <label class="block text-xs text-slate-500 font-medium">稳定性 LGB n_estimators</label>
+                        <input type="number" x-model.number="stabilityLgbNEstimators" min="50" max="500" step="10"
+                               class="w-full px-3 py-2 text-sm font-mono text-slate-700 bg-white border border-cyan-200 rounded-lg focus:ring-2 focus:ring-cyan-500/20 focus:border-cyan-500 outline-none">
+                    </div>
+                    <div class="space-y-1.5">
+                        <label class="block text-xs text-slate-500 font-medium">稳定性 LGB learning_rate</label>
+                        <input type="number" x-model.number="stabilityLgbLearningRate" min="0.001" max="0.3" step="0.01"
+                               class="w-full px-3 py-2 text-sm font-mono text-slate-700 bg-white border border-cyan-200 rounded-lg focus:ring-2 focus:ring-cyan-500/20 focus:border-cyan-500 outline-none">
+                    </div>
+                    <div class="space-y-1.5">
+                        <label class="block text-xs text-slate-500 font-medium">稳定性 LGB max_depth</label>
+                        <input type="number" x-model.number="stabilityLgbMaxDepth" min="2" max="20" step="1"
+                               class="w-full px-3 py-2 text-sm font-mono text-slate-700 bg-white border border-cyan-200 rounded-lg focus:ring-2 focus:ring-cyan-500/20 focus:border-cyan-500 outline-none">
+                    </div>
+                    <div class="space-y-1.5">
+                        <label class="block text-xs text-slate-500 font-medium">稳定性 LGB num_leaves</label>
+                        <input type="number" x-model.number="stabilityLgbNumLeaves" min="8" max="255" step="1"
+                               class="w-full px-3 py-2 text-sm font-mono text-slate-700 bg-white border border-cyan-200 rounded-lg focus:ring-2 focus:ring-cyan-500/20 focus:border-cyan-500 outline-none">
+                    </div>
+                </div>
+            </div>
+
+            <div class="pt-4 border-t border-slate-100 flex flex-wrap gap-3 items-center">
+                <button type="button" @click="optimizeFeParams" :disabled="feOptimizing || loading"
+                        class="px-5 py-2.5 bg-white hover:bg-cyan-50 text-cyan-600 font-bold rounded-xl border border-cyan-200 text-xs flex items-center gap-2 disabled:opacity-50">
+                    <span class="material-symbols-outlined text-[16px]" :class="{'animate-spin': feOptimizing}" x-text="feOptimizing ? 'sync' : 'auto_fix'"></span>
+                    <span x-text="feOptimizing ? 'AI 分析中…' : 'AI 推荐特征选择参数'"></span>
+                </button>
+                <button type="button" @click="runFeatureSelection"
+                        :disabled="loading || feOptimizing"
+                        class="px-6 py-2.5 bg-cyan-600 text-white text-sm font-bold rounded-xl hover:bg-cyan-700 shadow-md flex items-center gap-2 disabled:opacity-50">
+                    <span class="material-symbols-outlined text-[18px]" :class="{'animate-spin': loading}">play_arrow</span>
+                    <span x-text="loading ? '正在进行特征筛选…' : '开始特征筛选'"></span>
+                </button>
+                <button type="button" @click="resetFeParams" class="px-5 bg-slate-50 hover:bg-slate-100 text-slate-600 font-bold py-2.5 rounded-xl border border-slate-200 text-xs">
+                    重置模型超参
+                </button>
+            </div>
+            <details class="mt-1" x-show="feReasoning">
+                <summary class="text-xs text-slate-500 cursor-pointer">查看特征选择 AI 推荐理由</summary>
+                <pre class="mt-2 text-[10px] text-slate-600 bg-slate-50 p-3 rounded-lg whitespace-pre-wrap font-sans" x-text="feReasoning"></pre>
+            </details>
+        </div>
+    </div>
+
+    <!-- MLBase 训练参数（确认特征后显示于原阶段 1 位置） -->
+    <div class="bg-white rounded-2xl shadow-sm border border-purple-200 overflow-hidden" x-show="featuresConfirmed" x-cloak>
+        <div class="px-6 py-4 border-b border-purple-100 bg-purple-50/50">
+            <div class="flex items-center gap-2">
+                <span class="material-symbols-outlined text-purple-600 text-[18px]">model_training</span>
+                <span class="text-sm font-bold text-slate-700">阶段 1 · MLBase 训练参数（单次）</span>
+            </div>
+        </div>
+        <div class="p-6 space-y-6">
+            <div class="text-[10px] text-slate-400 bg-slate-50 px-3 py-2 rounded-lg">
+                单次 LightGBM（无网格搜索）；类别权重 balanced。全量 vs Top 各训练一次。
+            </div>
+
+            <div class="rounded-xl border border-amber-100 bg-amber-50/50 p-4 space-y-4">
+                <div class="flex items-center gap-2">
+                    <span class="material-symbols-outlined text-amber-600 text-[16px]">person</span>
+                    <span class="text-xs font-bold text-amber-800">用户设定 · AI 不会修改</span>
+                </div>
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <div class="space-y-1.5 max-w-xs">
+                        <label class="block text-xs text-amber-900/70 font-medium">召回目标 (验证集)</label>
+                        <input type="number" x-model.number="recallTarget" min="0.1" max="0.99" step="0.05"
+                               class="w-full px-3 py-2 text-sm font-mono text-slate-700 bg-white border border-amber-200 rounded-lg focus:ring-2 focus:ring-amber-500/20 focus:border-amber-400 outline-none">
+                        <div class="text-[10px] text-amber-700/60">选阈值使验证集召回不低于该值</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="rounded-xl border border-purple-100 bg-purple-50/30 p-4 space-y-4">
+                <div class="flex items-center gap-2">
+                    <span class="material-symbols-outlined text-purple-600 text-[16px]">tune</span>
+                    <span class="text-xs font-bold text-purple-800">模型超参 · AI 可推荐</span>
+                </div>
+                <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                    <div class="space-y-1.5">
+                        <label class="block text-xs text-slate-500 font-medium">learning_rate</label>
+                        <input type="number" x-model.number="learningRate" min="0.001" max="1" step="0.01"
+                               class="w-full px-3 py-2 text-sm font-mono bg-white border border-purple-200 rounded-lg focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500 outline-none">
+                    </div>
+                    <div class="space-y-1.5">
+                        <label class="block text-xs text-slate-500 font-medium">n_estimators</label>
+                        <input type="number" x-model.number="nEstimators" min="10" max="2000" step="10"
+                               class="w-full px-3 py-2 text-sm font-mono bg-white border border-purple-200 rounded-lg focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500 outline-none">
+                    </div>
+                    <div class="space-y-1.5">
+                        <label class="block text-xs text-slate-500 font-medium">max_depth</label>
+                        <input type="number" x-model.number="maxDepth" min="2" max="20" step="1"
+                               class="w-full px-3 py-2 text-sm font-mono bg-white border border-purple-200 rounded-lg focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500 outline-none">
+                    </div>
+                    <div class="space-y-1.5">
+                        <label class="block text-xs text-slate-500 font-medium">min_child_samples</label>
+                        <input type="number" x-model.number="minChildSamples" min="1" max="500" step="1"
+                               class="w-full px-3 py-2 text-sm font-mono bg-white border border-purple-200 rounded-lg focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500 outline-none">
+                    </div>
+                    <div class="space-y-1.5">
+                        <label class="block text-xs text-slate-500 font-medium">subsample</label>
+                        <input type="number" x-model.number="subsample" min="0.1" max="1" step="0.05"
+                               class="w-full px-3 py-2 text-sm font-mono bg-white border border-purple-200 rounded-lg focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500 outline-none">
+                    </div>
+                    <div class="space-y-1.5">
+                        <label class="block text-xs text-slate-500 font-medium">reg_alpha</label>
+                        <input type="number" x-model.number="regAlpha" min="0" max="10" step="0.01"
+                               class="w-full px-3 py-2 text-sm font-mono bg-white border border-purple-200 rounded-lg focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500 outline-none">
+                    </div>
+                    <div class="space-y-1.5">
+                        <label class="block text-xs text-slate-500 font-medium">reg_lambda</label>
+                        <input type="number" x-model.number="regLambda" min="0" max="10" step="0.01"
+                               class="w-full px-3 py-2 text-sm font-mono bg-white border border-purple-200 rounded-lg focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500 outline-none">
+                    </div>
+                </div>
+            </div>
+
+            <div class="pt-4 border-t border-purple-100 flex flex-wrap gap-3 items-center">
+                <button type="button" @click="optimizeMlParams" :disabled="mlOptimizing || mlLoading || mlAutoresearchRunning"
+                        class="px-5 py-2.5 bg-white hover:bg-purple-50 text-purple-600 font-bold rounded-xl border border-purple-200 text-xs flex items-center gap-2 disabled:opacity-50">
+                    <span class="material-symbols-outlined text-[16px]" :class="{'animate-spin': mlOptimizing}" x-text="mlOptimizing ? 'sync' : 'auto_fix'"></span>
+                    <span x-text="mlOptimizing ? 'AI 分析中…' : 'AI 推荐 MLBase 参数'"></span>
+                </button>
+                <button type="button" @click="runMlComparison"
+                        :disabled="mlLoading || mlAutoresearchRunning || mlOptimizing"
+                        class="px-6 py-2.5 bg-purple-600 text-white text-sm font-bold rounded-xl hover:bg-purple-700 disabled:opacity-50 flex items-center gap-2">
+                    <span class="material-symbols-outlined text-[18px]" :class="{'animate-spin': mlLoading}">play_arrow</span>
+                    <span x-text="mlLoading ? 'ML 对比运行中…' : '运行 ML 对比'"></span>
+                </button>
+                <button type="button" @click="resetMlParams" class="px-5 bg-slate-50 hover:bg-slate-100 text-slate-600 font-bold py-2.5 rounded-xl border border-slate-200 text-xs">
+                    重置模型超参
+                </button>
+            </div>
+            <details class="mt-1" x-show="mlReasoning">
+                <summary class="text-xs text-slate-500 cursor-pointer">查看 MLBase AI 推荐理由</summary>
+                <pre class="mt-2 text-[10px] text-slate-600 bg-slate-50 p-3 rounded-lg whitespace-pre-wrap font-sans" x-text="mlReasoning"></pre>
+            </details>
+
+            <div class="pt-4 mt-4 border-t border-purple-100">
+                <h3 class="text-xs font-bold text-slate-700 mb-3 flex items-center gap-2">
+                    <span class="material-symbols-outlined text-[16px] text-violet-500">science</span>
+                    MLBase autoresearch 演进
+                </h3>
+                <p class="text-[10px] text-slate-500 mb-3">
+                    对上方选中的 Test 方案（<span class="font-bold" x-text="mlTestVariant === 'top_features' ? 'Top 特征' : '全量特征'"></span>）自动迭代超参；仅当验证精度严格超过历史最优时更新 ML 对比结果。
+                </p>
+                <div class="flex flex-wrap items-center gap-3">
+                    <button type="button" @click="startMlAutoresearch"
+                            :disabled="mlAutoresearchRunning || mlLoading || mlTestLoading"
+                            class="px-5 py-2.5 bg-violet-600 hover:bg-violet-700 text-white font-bold rounded-xl transition shadow-sm text-xs flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
+                        <span class="material-symbols-outlined text-[16px]" :class="{'animate-spin': mlAutoresearchRunning}">cycle</span>
+                        <span x-text="mlAutoresearchRunning ? '演进中…' : 'autoresearch 演进'"></span>
+                    </button>
+                    <button type="button" @click="stopMlAutoresearch"
+                            :disabled="mlAutoresearchStopping && !mlAutoresearchRunning"
+                            class="px-5 py-2.5 bg-red-50 hover:bg-red-100 text-red-600 font-bold rounded-xl border border-red-200 text-xs flex items-center gap-2 disabled:opacity-50">
+                        <span class="material-symbols-outlined text-[16px]" :class="{'animate-spin': mlAutoresearchStopping}">stop_circle</span>
+                        <span x-text="mlAutoresearchStopping ? '正在停止…' : '停止'"></span>
+                    </button>
+                    <div class="flex items-center gap-2 bg-slate-50 px-3 py-2 rounded-xl border border-slate-200">
+                        <span class="text-xs font-bold text-slate-500 whitespace-nowrap">最大无效迭代</span>
+                        <input type="number" x-model.number="mlMaxInvalidIterations" min="1" max="20" step="1"
+                               :disabled="mlAutoresearchRunning"
+                               class="w-14 bg-transparent border-none text-sm font-mono text-slate-700 focus:ring-0 p-0 text-center font-bold">
+                    </div>
+                    <div class="flex items-center gap-2 bg-slate-50 px-3 py-2 rounded-xl border border-slate-200">
+                        <span class="text-xs font-bold text-slate-500 whitespace-nowrap">训练超时(分)</span>
+                        <input type="number" x-model.number="mlAutoresearchTimeoutMinutes" min="1" max="120" step="1"
+                               :disabled="mlAutoresearchRunning"
+                               class="w-14 bg-transparent border-none text-sm font-mono text-slate-700 focus:ring-0 p-0 text-center font-bold">
+                    </div>
+                    <div x-show="mlAutoresearchRunning || mlAutoresearchBestPrecision != null" class="text-[10px] text-slate-500 font-medium">
+                        轮次 <span class="font-bold text-violet-700" x-text="mlAutoresearchIteration"></span>
+                        · 最佳验证精度 <span class="font-bold text-emerald-700" x-text="mlAutoresearchBestPrecision != null ? (mlAutoresearchBestPrecision * 100).toFixed(2) + '%' : '-'"></span>
+                        · 无效连续 <span class="font-bold" x-text="mlAutoresearchInvalidStreak + '/' + mlMaxInvalidIterations"></span>
+                    </div>
+                </div>
+                <p class="text-[10px] text-slate-400 mt-2 leading-relaxed">
+                    每轮读取 <code class="font-mono">ml_train.tsv</code>、<code class="font-mono">MLProgram.md</code>、数据集报告与 MLBase 源码送 LLM；超时记入 TSV；连续 N 次验证精度未提升或点击停止则结束。
+                </p>
+            </div>
+        </div>
+    </div>
+
     <!-- Logs & Results -->
     <div class="grid grid-cols-1 lg:grid-cols-1 gap-6">
         
         <!-- Logs (Collapsible or always visible during run) -->
-        <div class="bg-slate-900 rounded-2xl overflow-hidden shadow-lg border border-slate-800" x-show="logs.length > 0 || loading">
-            <div class="flex items-center justify-between px-4 py-3 border-b border-slate-800 bg-slate-950/50">
+        <div class="bg-slate-900 rounded-2xl overflow-hidden shadow-lg border border-slate-800 flex flex-col transition-all duration-300 ease-in-out"
+             :class="isLogExpanded ? 'fixed inset-4 z-50' : ''"
+             x-show="logs.length > 0 || loading || mlLoading || mlAutoresearchRunning || rfecvLoading || mlTestLoading">
+            <div class="flex items-center justify-between px-4 py-3 border-b border-slate-800 bg-slate-950/50 flex-none"
+                 @dblclick="isLogExpanded = !isLogExpanded">
                 <div class="flex items-center gap-2">
                     <span class="material-symbols-outlined text-slate-400 text-sm">terminal</span>
                     <span class="text-xs font-mono text-slate-400">EXECUTION LOGS</span>
                 </div>
-                <button @click="logs = []" class="text-slate-500 hover:text-slate-300 text-xs flex items-center gap-1">
-                    <span class="material-symbols-outlined text-[14px]">close</span> 关闭
-                </button>
+                <div class="flex items-center gap-2">
+                    <button type="button" @click="isLogExpanded = !isLogExpanded"
+                            class="text-slate-500 hover:text-slate-300 text-xs flex items-center gap-1 px-2 py-1 rounded hover:bg-white/5 transition-colors">
+                        <span class="material-symbols-outlined text-[16px]" x-text="isLogExpanded ? 'close_fullscreen' : 'open_in_full'"></span>
+                    </button>
+                    <button type="button" @click="logs = []" class="text-slate-500 hover:text-slate-300 text-xs flex items-center gap-1 px-2 py-1 rounded hover:bg-white/5 transition-colors">
+                        <span class="material-symbols-outlined text-[14px]">delete</span> 清空
+                    </button>
+                </div>
             </div>
-            <div class="p-4 max-h-48 overflow-y-auto font-mono text-xs text-slate-300 space-y-1" x-ref="logContainer">
+            <div class="p-4 overflow-y-auto font-mono text-xs text-slate-300 space-y-1 flex-1"
+                 :class="isLogExpanded ? 'min-h-0 max-h-none' : 'max-h-48'"
+                 x-ref="logContainer">
                  <template x-for="(log, idx) in logs" :key="idx">
                     <div class="break-words border-l-2 pl-3 py-0.5" :class="{'border-red-500 text-red-400': log.type === 'error', 'border-green-500 text-green-400': log.type === 'success', 'border-slate-700': log.type === 'info'}">
                         <span x-text="log.message"></span>
@@ -84,49 +361,62 @@
         <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
             <div class="px-8 py-6 border-b border-slate-100 flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <div>
-                    <h3 class="text-lg font-bold text-slate-900">特征排名结果</h3>
-                    <p class="text-slate-500 text-xs mt-1">综合三个训练子集的特征重要性排名</p>
+                    <h3 class="text-lg font-bold text-slate-900">特征候选列表</h3>
+                    <p class="text-slate-500 text-xs mt-1" x-show="!selectionCollapsed">按重要性排序；可自定义勾选后确认</p>
+                    <p class="text-slate-500 text-xs mt-1" x-show="selectionCollapsed">已确认特征，可下载结果或重新选择</p>
                 </div>
                 
-                <div class="flex items-center gap-3">
-                    <!-- Load Previous Results Button (Conditional) -->
+                <div class="flex items-center gap-3 flex-wrap" x-show="!selectionCollapsed">
                     <button @click="loadResults" 
                             x-show="!hasResults && canLoadOldResults"
                             class="px-4 py-2 bg-slate-50 text-slate-600 text-sm font-bold rounded-lg hover:bg-slate-100 transition-colors flex items-center gap-2 border border-slate-200">
                         <span class="material-symbols-outlined text-[18px]">history</span>
                         加载历史结果
                     </button>
-
                     <div class="relative">
                         <span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-[18px]">search</span>
                         <input type="text" x-model="searchQuery" placeholder="搜索特征..." class="pl-9 pr-4 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-cyan-500/20 focus:border-cyan-500 outline-none w-64 transition-all">
                     </div>
-                    <a href="{{ url_for('data_tool.download_results') }}" 
-                       :class="{'pointer-events-none opacity-50': !hasResults}"
-                       class="px-4 py-2 bg-slate-100 text-slate-700 text-sm font-bold rounded-lg hover:bg-slate-200 transition-colors flex items-center gap-2">
-                        <span class="material-symbols-outlined text-[18px]">download</span>
-                        下载CSV
-                    </a>
                 </div>
             </div>
 
-            <div class="overflow-x-auto">
+            <!-- 确认后：摘要 + 下载 -->
+            <div class="px-8 py-6 space-y-4" x-show="selectionCollapsed && hasResults" x-cloak>
+                <div class="flex flex-wrap items-center gap-4">
+                    <span class="text-sm text-slate-700">已确认 <span class="font-bold text-cyan-600" x-text="confirmedFeatureCount || selectedCount"></span> 个 Top 特征</span>
+                    <button @click="expandSelection()" type="button"
+                            class="px-4 py-2 text-xs font-bold text-cyan-600 bg-cyan-50 border border-cyan-100 rounded-lg hover:bg-cyan-100">
+                        重新选择
+                    </button>
+                </div>
+                <div class="flex flex-wrap gap-3">
+                    <template x-for="dl in downloadLinks" :key="dl.file">
+                        <a :href="dl.url"
+                           class="px-4 py-2.5 bg-slate-100 text-slate-700 text-sm font-bold rounded-lg hover:bg-slate-200 flex items-center gap-2">
+                            <span class="material-symbols-outlined text-[18px]">download</span>
+                            <span x-text="dl.label"></span>
+                        </a>
+                    </template>
+                </div>
+            </div>
+
+            <div class="overflow-x-auto" x-show="!selectionCollapsed">
                 <table class="w-full text-left text-sm">
                     <thead class="bg-slate-50 text-slate-500 font-bold border-b border-slate-200">
                         <tr>
-                            <th class="px-8 py-4 w-20">排名</th>
+                            <th class="px-4 py-4 w-12 text-center">选用</th>
+                            <th class="px-4 py-4 w-16">排名</th>
                             <th class="px-6 py-4">特征名称 (中文)</th>
                             <th class="px-6 py-4">特征名称 (英文)</th>
-                            <th class="px-6 py-4 text-center">子集1 排名</th>
-                            <th class="px-6 py-4 text-center">子集2 排名</th>
-                            <th class="px-6 py-4 text-center">子集3 排名</th>
-                            <th class="px-6 py-4 text-right">平均排名</th>
+                            <th class="px-4 py-4 text-center">稳定命中</th>
+                            <th class="px-4 py-4 text-right">LGB 重要性</th>
+                            <th class="px-4 py-4 text-right" x-show="hasRfecvScores">RFECV 分值</th>
                         </tr>
                     </thead>
                     <tbody class="divide-y divide-slate-100">
-                        <template x-if="!results || results.length === 0">
+                        <template x-if="!filteredResults || filteredResults.length === 0">
                             <tr>
-                                <td colspan="7" class="px-8 py-16 text-center text-slate-400">
+                                <td :colspan="hasRfecvScores ? 7 : 6" class="px-8 py-16 text-center text-slate-400">
                                     <div class="flex flex-col items-center justify-center">
                                         <div class="size-16 bg-slate-50 rounded-full flex items-center justify-center mb-4">
                                             <span class="material-symbols-outlined text-[32px] text-slate-300">bar_chart</span>
@@ -138,33 +428,19 @@
                             </tr>
                         </template>
                         
-                        <template x-for="(row, idx) in filteredResults" :key="idx">
+                        <template x-for="(row, idx) in filteredResults" :key="row.feature_en || idx">
                             <tr class="hover:bg-cyan-50/30 transition-colors group">
-                                <td class="px-8 py-4">
-                                    <div class="size-8 rounded-lg flex items-center justify-center text-sm font-bold shadow-sm"
-                                         :class="{
-                                             'bg-yellow-100 text-yellow-600 border border-yellow-200': idx === 0,
-                                             'bg-slate-200 text-slate-600 border border-slate-300': idx === 1,
-                                             'bg-orange-100 text-orange-600 border border-orange-200': idx === 2,
-                                             'bg-slate-50 text-slate-400 border border-slate-100': idx > 2
-                                         }">
-                                        <span x-text="idx + 1"></span>
-                                    </div>
+                                <td class="px-4 py-4 text-center">
+                                    <input type="checkbox" :checked="row.selected" @change="toggleFeature(row)"
+                                           class="rounded border-slate-300 text-cyan-600 focus:ring-cyan-500">
                                 </td>
-                                <td class="px-6 py-4 font-bold text-slate-800" x-text="row['特征名称（中文）']"></td>
-                                <td class="px-6 py-4 font-mono text-slate-500 text-xs" x-text="row['特征名称（英文）']"></td>
-                                <td class="px-6 py-4 text-center text-slate-400 text-xs" x-text="row['训练集1_高置信负转正_排名'] || '-'"></td>
-                                <td class="px-6 py-4 text-center text-slate-400 text-xs" x-text="row['训练集2_伪正样本补充_排名'] || '-'"></td>
-                                <td class="px-6 py-4 text-center text-slate-400 text-xs" x-text="row['训练集3_原始数据_排名'] || '-'"></td>
-                                <td class="px-6 py-4 text-right">
-                                    <div class="flex items-center justify-end gap-3">
-                                        <div class="w-24 h-1.5 bg-slate-100 rounded-full overflow-hidden hidden md:block">
-                                            <!-- Inverse progress bar since lower rank is better. Assuming max rank ~100 or relative -->
-                                            <div class="h-full bg-cyan-500 rounded-full" :style="`width: ${Math.max(5, 100 - (row['平均排名'] / 2))}%`"></div>
-                                        </div>
-                                        <span class="font-bold text-cyan-600 font-mono" x-text="row['平均排名'].toFixed(2)"></span>
-                                    </div>
-                                </td>
+                                <td class="px-4 py-4 text-sm font-mono text-slate-500" x-text="row.rank || (idx + 1)"></td>
+                                <td class="px-6 py-4 font-bold text-slate-800" x-text="row.feature_zh"></td>
+                                <td class="px-6 py-4 font-mono text-slate-500 text-xs" x-text="row.feature_en"></td>
+                                <td class="px-4 py-4 text-center font-mono text-xs" x-text="row.stable_hits + '/3'"></td>
+                                <td class="px-4 py-4 text-right font-mono text-xs text-cyan-600" x-text="row.lgb_importance_mean"></td>
+                                <td class="px-4 py-4 text-right font-mono text-xs text-violet-600" x-show="hasRfecvScores"
+                                    x-text="formatRfecvScore(row)"></td>
                             </tr>
                         </template>
                     </tbody>
@@ -172,7 +448,7 @@
             </div>
             
             <!-- Pagination / Toggle -->
-            <div class="px-8 py-4 border-t border-slate-100 bg-slate-50/50 flex flex-col md:flex-row justify-between items-center gap-4" x-show="results && results.length > 0">
+            <div class="px-8 py-4 border-t border-slate-100 bg-slate-50/50 flex flex-col md:flex-row justify-between items-center gap-4" x-show="!selectionCollapsed && candidates && candidates.length > 0">
                 <div class="text-xs text-slate-500">
                     显示 <span class="font-bold text-slate-700" x-text="filteredResults.length"></span> 条结果 
                     <span x-show="!showAll && results.length > 10" class="text-slate-400">(共 <span x-text="results.length"></span> 条)</span>
@@ -186,6 +462,112 @@
                           :class="showAll ? 'rotate-180' : ''">expand_more</span>
                 </button>
             </div>
+
+            <div class="px-8 py-4 border-t border-slate-100 flex flex-wrap gap-3 items-center" x-show="!selectionCollapsed && candidates && candidates.length > 0">
+                <button @click="confirmFeatures" :disabled="confirming"
+                        class="px-6 py-2.5 bg-cyan-600 text-white text-sm font-bold rounded-xl hover:bg-cyan-700 disabled:opacity-50">
+                    <span x-text="confirming ? '保存中…' : '确认特征'"></span>
+                </button>
+            </div>
+        </div>
+
+        <!-- ML 对比结果 -->
+        <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-6" x-show="mlComparison">
+            <h3 class="text-lg font-bold text-slate-900 mb-4">MLBase 对比（召回≥50% 下验证集精度）</h3>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div class="p-4 rounded-xl bg-slate-50 border border-slate-200">
+                    <div class="text-xs font-bold text-slate-500 mb-2">全量特征</div>
+                    <template x-if="mlComparison && mlComparison.full_features">
+                        <div class="space-y-1 text-sm font-mono">
+                            <div>特征数: <span x-text="mlComparison.full_features.feature_count"></span></div>
+                            <div>验证集精度: <span class="text-cyan-600 font-bold" x-text="(mlComparison.full_features.val_precision * 100).toFixed(2) + '%'"></span></div>
+                            <div>验证集召回: <span x-text="(mlComparison.full_features.val_recall * 100).toFixed(2) + '%'"></span></div>
+                            <div>最优阈值: <span x-text="mlComparison.full_features.val_threshold"></span></div>
+                        </div>
+                    </template>
+                </div>
+                <div class="p-4 rounded-xl bg-cyan-50 border border-cyan-100">
+                    <div class="text-xs font-bold text-cyan-700 mb-2">Top 特征</div>
+                    <template x-if="mlComparison && mlComparison.top_features">
+                        <div class="space-y-1 text-sm font-mono">
+                            <div>特征数: <span x-text="mlComparison.top_features.feature_count"></span></div>
+                            <div>验证集精度: <span class="text-cyan-600 font-bold" x-text="(mlComparison.top_features.val_precision * 100).toFixed(2) + '%'"></span></div>
+                            <div>验证集召回: <span x-text="(mlComparison.top_features.val_recall * 100).toFixed(2) + '%'"></span></div>
+                            <div>最优阈值: <span x-text="mlComparison.top_features.val_threshold"></span></div>
+                        </div>
+                    </template>
+                </div>
+            </div>
+            <div class="mt-4 text-sm text-slate-600" x-show="mlComparison && mlComparison.summary">
+                精度差 (Top - 全量): <span class="font-bold" x-text="((mlComparison.summary.precision_delta || 0) * 100).toFixed(2) + '%'"></span>
+            </div>
+            <div class="mt-4 p-4 rounded-xl bg-amber-50 border border-amber-200" x-show="suggestRfecv && featuresConfirmed">
+                <p class="text-xs text-amber-800 mb-3">全量特征验证集精度高于当前 Top 特征，可使用 RFECV 重新筛选 Top 特征集。</p>
+                <button @click="runRfecvReselection" :disabled="rfecvLoading"
+                        class="px-5 py-2.5 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold rounded-xl disabled:opacity-50 flex items-center gap-2">
+                    <span class="material-symbols-outlined text-[16px]" :class="{'animate-spin': rfecvLoading}">cycle</span>
+                    <span x-text="rfecvLoading ? 'RFECV 运行中…' : 'RFECV 重选 Top 特征'"></span>
+                </button>
+            </div>
+
+            <!-- Test 集评估 -->
+            <div class="mt-6 pt-6 border-t border-slate-200">
+                <h4 class="text-sm font-bold text-slate-800 mb-3">Test 集评估（沿用验证集阈值）</h4>
+                <p class="text-[10px] text-slate-500 mb-4">在完整 train 上按所选方案重训模型，使用 ML 对比阶段确定的阈值，在 test_dataset.csv 上输出指标与预测。</p>
+                <div class="flex flex-wrap gap-4 mb-4">
+                    <label class="inline-flex items-center gap-2 cursor-pointer">
+                        <input type="radio" value="top_features" x-model="mlTestVariant" class="text-cyan-600 focus:ring-cyan-500">
+                        <span class="text-xs font-medium text-slate-700">Top 特征方案</span>
+                    </label>
+                    <label class="inline-flex items-center gap-2 cursor-pointer" x-show="mlComparison && mlComparison.full_features">
+                        <input type="radio" value="full_features" x-model="mlTestVariant" class="text-cyan-600 focus:ring-cyan-500">
+                        <span class="text-xs font-medium text-slate-700">全量特征方案</span>
+                    </label>
+                </div>
+                <button @click="runMlTestEval" :disabled="mlTestLoading || mlLoading || mlAutoresearchRunning"
+                        class="px-6 py-2.5 bg-emerald-600 text-white text-sm font-bold rounded-xl hover:bg-emerald-700 disabled:opacity-50 flex items-center gap-2">
+                    <span class="material-symbols-outlined text-[18px]" :class="{'animate-spin': mlTestLoading}">science</span>
+                    <span x-text="mlTestLoading ? 'Test 评估中…' : '在 Test 集上评估'"></span>
+                </button>
+
+                <div class="mt-4 p-4 rounded-xl bg-emerald-50 border border-emerald-100" x-show="mlTestMetrics">
+                    <div class="text-xs font-bold text-emerald-800 mb-2" x-text="mlTestMetrics ? ('方案: ' + mlTestMetrics.variant_label) : ''"></div>
+                    <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm font-mono">
+                        <div>
+                            <div class="text-[10px] text-slate-500">Test 精度</div>
+                            <div class="font-bold text-emerald-700" x-text="mlTestMetrics ? (mlTestMetrics.test_precision * 100).toFixed(2) + '%' : '-'"></div>
+                        </div>
+                        <div>
+                            <div class="text-[10px] text-slate-500">Test 召回</div>
+                            <div x-text="mlTestMetrics ? (mlTestMetrics.test_recall * 100).toFixed(2) + '%' : '-'"></div>
+                        </div>
+                        <div>
+                            <div class="text-[10px] text-slate-500">Test F1</div>
+                            <div x-text="mlTestMetrics ? (mlTestMetrics.test_f1 * 100).toFixed(2) + '%' : '-'"></div>
+                        </div>
+                        <div>
+                            <div class="text-[10px] text-slate-500">阈值</div>
+                            <div x-text="mlTestMetrics ? mlTestMetrics.threshold : '-'"></div>
+                        </div>
+                    </div>
+                    <div class="mt-2 text-[10px] text-slate-500" x-show="mlTestMetrics">
+                        对比阶段验证集: 精度 <span x-text="(mlTestMetrics.val_precision * 100).toFixed(2) + '%'"></span>,
+                        召回 <span x-text="(mlTestMetrics.val_recall * 100).toFixed(2) + '%'"></span>
+                    </div>
+                    <div class="mt-4 flex flex-wrap gap-3">
+                        <a :href="'{{ url_for("data_tool.download_results") }}?file=mlbase_test_predictions.csv'"
+                           class="px-4 py-2 bg-white border border-emerald-200 text-emerald-700 text-xs font-bold rounded-lg hover:bg-emerald-50 flex items-center gap-2">
+                            <span class="material-symbols-outlined text-[16px]">download</span>
+                            Test 预测 CSV
+                        </a>
+                        <a :href="'{{ url_for("data_tool.download_results") }}?file=mlbase_test_metrics.json'"
+                           class="px-4 py-2 bg-white border border-emerald-200 text-emerald-700 text-xs font-bold rounded-lg hover:bg-emerald-50 flex items-center gap-2">
+                            <span class="material-symbols-outlined text-[16px]">download</span>
+                            Test 指标 JSON
+                        </a>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
 </div>
@@ -193,33 +575,434 @@
 
 {% block scripts %}
 <script>
+    const LLM_STORAGE_KEYS = {
+        apiKey: 'finrisk_llm_api_key',
+        apiBase: 'finrisk_llm_api_base',
+        model: 'finrisk_llm_model',
+        serverBoot: 'finrisk_llm_server_boot_id',
+    };
+
+    function getServerBootId() {
+        const meta = document.querySelector('meta[name="finrisk-server-boot-id"]');
+        return meta ? (meta.getAttribute('content') || '') : '';
+    }
+
+    function clearLlmConfigStorage() {
+        Object.values(LLM_STORAGE_KEYS).forEach((k) => {
+            try {
+                localStorage.removeItem(k);
+                sessionStorage.removeItem(k);
+            } catch (e) { /* private mode */ }
+        });
+    }
+
+    function llmStorageRead(key) {
+        try {
+            return localStorage.getItem(key);
+        } catch (e) { /* private mode */ }
+        return null;
+    }
+
+    function llmStorageWrite(key, value) {
+        try {
+            if (value) localStorage.setItem(key, value);
+            else localStorage.removeItem(key);
+        } catch (e) { /* private mode */ }
+    }
+
+    /** 若 run.py 已重启则清空凭证；返回 true 表示本轮进程内可加载缓存 */
+    function syncLlmConfigBootId() {
+        const current = getServerBootId();
+        if (!current) return true;
+        const stored = llmStorageRead(LLM_STORAGE_KEYS.serverBoot);
+        if (stored === current) return true;
+        clearLlmConfigStorage();
+        llmStorageWrite(LLM_STORAGE_KEYS.serverBoot, current);
+        return false;
+    }
+
     function featureEngineeringApp() {
         return {
             loading: false,
             uploading: false,
+            feOptimizing: false,
+            mlOptimizing: false,
+            confirming: false,
+            mlLoading: false,
+            featuresConfirmed: false,
+            selectionCollapsed: false,
+            confirmedFeatureCount: 0,
+            availableDownloads: [],
+            suggestRfecv: false,
+            rfecvLoading: false,
+            rfecvPollTimer: null,
+            rfecvLogOffset: 0,
+            rfecvHandled: false,
+            estimatedRatePct: 10,
+            miFeatureThreshold: 100,
+            stabilityTopK: 50,
+            stabilityMinHits: 2,
+            stabilityRusRatio: 0.15,
+            stabilityLgbNEstimators: 200,
+            stabilityLgbLearningRate: 0.05,
+            stabilityLgbMaxDepth: 6,
+            stabilityLgbNumLeaves: 31,
+            feReasoning: '',
+            mlReasoning: '',
+            labelCol: 'label',
+            datasetType: 'split',
+            candidates: null,
+            meta: null,
+            mlComparison: null,
+            featureSelectionPollTimer: null,
+            featureSelectionLogOffset: 0,
+            featureSelectionHandled: false,
+            apiKey: '',
+            apiBase: '',
+            modelName: 'gpt-4o-mini',
             currentFile: 'data/train.csv',
             logs: [],
+            isLogExpanded: false,
             results: null,
             searchQuery: '',
             hasResults: false,
+            regAlpha: 0.1,
+            regLambda: 0.1,
+            recallTarget: 0.5,
+            learningRate: 0.05,
+            nEstimators: 150,
+            maxDepth: 6,
+            minChildSamples: 50,
+            subsample: 0.8,
+            mlPollTimer: null,
+            mlLogOffset: 0,
+            mlHandled: false,
+            mlTestVariant: 'top_features',
+            mlTestMetrics: null,
+            mlTestLoading: false,
+            mlTestPollTimer: null,
+            mlTestLogOffset: 0,
+            mlTestHandled: false,
+            mlAutoresearchRunning: false,
+            mlAutoresearchActive: false,
+            mlAutoresearchStarted: false,
+            mlAutoresearchStopping: false,
+            mlMaxInvalidIterations: 3,
+            mlAutoresearchTimeoutMinutes: 20,
+            mlAutoresearchIteration: 0,
+            mlAutoresearchBestPrecision: null,
+            mlAutoresearchInvalidStreak: 0,
+            mlAutoresearchLogOffset: 0,
+            mlAutoresearchPollTimer: null,
+            defaultFeParams: {
+                estimatedRatePct: 10,
+                miFeatureThreshold: 100,
+                stabilityTopK: 50,
+                stabilityMinHits: 2,
+            },
+            defaultFeAiParams: {
+                stabilityRusRatio: 0.15,
+                stabilityLgbNEstimators: 200,
+                stabilityLgbLearningRate: 0.05,
+                stabilityLgbMaxDepth: 6,
+                stabilityLgbNumLeaves: 31,
+            },
+            defaultMlParams: {
+                recallTarget: 0.5,
+            },
+            defaultMlAiParams: {
+                regAlpha: 0.1,
+                regLambda: 0.1,
+                learningRate: 0.05,
+                nEstimators: 150,
+                maxDepth: 6,
+                minChildSamples: 50,
+                subsample: 0.8,
+            },
 
             canLoadOldResults: false,
-            showAll: false,
+            showAll: true,
+
+            get downloadLinks() {
+                const base = '{{ url_for("data_tool.download_results") }}';
+                const labels = {
+                    'feature_candidates.csv': '候选特征 CSV',
+                    'top_features.csv': 'Top 特征 CSV',
+                    'mlbase_comparison.json': 'ML 对比 JSON',
+                    'mlbase_test_predictions.csv': 'Test 预测 CSV',
+                    'mlbase_test_metrics.json': 'Test 指标 JSON',
+                    'feature_selection_meta.json': '筛选元数据',
+                    'rfecv_meta.json': 'RFECV 元数据',
+                };
+                const files = this.availableDownloads.length
+                    ? this.availableDownloads
+                    : ['feature_candidates.csv', 'top_features.csv'];
+                return files.map(file => ({
+                    file,
+                    label: labels[file] || file,
+                    url: base + '?file=' + encodeURIComponent(file),
+                }));
+            },
+
+            get selectedCount() {
+                if (!this.candidates) return 0;
+                return this.candidates.filter(c => c.selected).length;
+            },
+
+            get hasRfecvScores() {
+                const list = this.candidates || this.results || [];
+                return list.some(r =>
+                    r.rfecv_score !== undefined && r.rfecv_score !== null && r.rfecv_score !== ''
+                );
+            },
+
+            formatRfecvScore(row) {
+                const v = row.rfecv_score;
+                if (v === undefined || v === null || v === '') return '—';
+                const n = parseFloat(v);
+                if (Number.isNaN(n)) return String(v);
+                return n.toFixed(4);
+            },
 
             init() {
-                // Check if results exist but DO NOT load them automatically
-                this.checkExistingResults();
+                this.loadLlmConfigFromStorage();
+                this.loadWorkflowContext().then(() => {
+                    this.checkExistingResults();
+                    this.syncFeatureSelectionOnLoad();
+                    this.loadConfirmedState();
+                    this.loadMlComparisonFromDisk();
+                    this.loadMlTestFromDisk();
+                    this.restoreMlAutoresearchFromServer();
+                });
+                window.addEventListener('pageshow', (event) => {
+                    if (event.persisted) {
+                        this.refreshWorkflowFromDisk();
+                    }
+                });
             },
-            
-            async checkExistingResults() {
+
+            async refreshWorkflowFromDisk() {
+                await this.loadWorkflowContext();
+                await this.checkExistingResults();
+                await this.loadConfirmedState();
+                await this.loadMlComparisonFromDisk();
+                await this.loadMlTestFromDisk();
+                await this.syncFeatureSelectionOnLoad();
+                await this.restoreMlAutoresearchFromServer();
+            },
+
+            async loadMlTestFromDisk() {
                 try {
-                    // Head request to check if file exists
-                    const res = await fetch('{{ url_for("data_tool.get_results_data") }}', { method: 'HEAD' });
-                    if (res.ok) {
-                        this.canLoadOldResults = true;
+                    const res = await fetch('{{ url_for("data_tool.mlbase_test_result") }}');
+                    if (!res.ok) return;
+                    const data = await res.json();
+                    if (data.success && data.metrics) {
+                        this.mlTestMetrics = data.metrics;
+                        if (data.metrics.variant) {
+                            this.mlTestVariant = data.metrics.variant;
+                        }
                     }
                 } catch (e) {
-                    console.log("No existing results found");
+                    console.warn('loadMlTestFromDisk', e);
+                }
+            },
+
+            async loadMlComparisonFromDisk() {
+                try {
+                    const res = await fetch('{{ url_for("data_tool.mlbase_comparison_result") }}');
+                    if (!res.ok) return;
+                    const data = await res.json();
+                    if (data.success && data.comparison) {
+                        this.mlComparison = data.comparison;
+                        const delta = data.comparison.summary && data.comparison.summary.precision_delta;
+                        this.suggestRfecv = delta != null && parseFloat(delta) < 0;
+                    }
+                } catch (e) {
+                    console.warn('loadMlComparisonFromDisk', e);
+                }
+            },
+
+            sortCandidatesList(list) {
+                if (!list || !list.length) return list;
+                return [...list].sort((a, b) => {
+                    const as = a.rfecv_score;
+                    const bs = b.rfecv_score;
+                    const aScore = as !== undefined && as !== null && as !== '' ? parseFloat(as) : NaN;
+                    const bScore = bs !== undefined && bs !== null && bs !== '' ? parseFloat(bs) : NaN;
+                    if (!Number.isNaN(aScore) || !Number.isNaN(bScore)) {
+                        if (Number.isNaN(aScore)) return 1;
+                        if (Number.isNaN(bScore)) return -1;
+                        if (bScore !== aScore) return bScore - aScore;
+                    }
+                    const ar = a.rfecv_rank;
+                    const br = b.rfecv_rank;
+                    const aHas = ar !== undefined && ar !== null && ar !== '';
+                    const bHas = br !== undefined && br !== null && br !== '';
+                    if (aHas && bHas) {
+                        return Number(ar) - Number(br);
+                    }
+                    const ai = parseFloat(a.lgb_importance_mean) || 0;
+                    const bi = parseFloat(b.lgb_importance_mean) || 0;
+                    if (bi !== ai) return bi - ai;
+                    return (parseFloat(a.rank) || 9999) - (parseFloat(b.rank) || 9999);
+                });
+            },
+
+            async loadConfirmedState() {
+                try {
+                    const res = await fetch('{{ url_for("data_tool.feature_selection_confirmed") }}');
+                    const data = await res.json();
+                    if (!data.success || !data.confirmed) return;
+                    this.featuresConfirmed = true;
+                    this.selectionCollapsed = true;
+                    this.confirmedFeatureCount = data.count || 0;
+                    this.availableDownloads = data.available_downloads || [];
+                    if (this.candidates && data.features && data.features.length) {
+                        const set = new Set(data.features);
+                        this.candidates.forEach(c => { c.selected = set.has(c.feature_en); });
+                    }
+                } catch (e) {
+                    console.warn('loadConfirmedState', e);
+                }
+            },
+
+            expandSelection() {
+                this.selectionCollapsed = false;
+            },
+
+            loadLlmConfigFromStorage() {
+                if (!syncLlmConfigBootId()) {
+                    this.apiKey = '';
+                    this.apiBase = '';
+                    this.modelName = 'gpt-4o-mini';
+                    return;
+                }
+                const key = llmStorageRead(LLM_STORAGE_KEYS.apiKey);
+                const base = llmStorageRead(LLM_STORAGE_KEYS.apiBase);
+                const model = llmStorageRead(LLM_STORAGE_KEYS.model);
+                if (key) this.apiKey = key;
+                if (base) this.apiBase = base;
+                if (model) this.modelName = model;
+            },
+
+            persistLlmConfig() {
+                const boot = getServerBootId();
+                if (boot) llmStorageWrite(LLM_STORAGE_KEYS.serverBoot, boot);
+                llmStorageWrite(LLM_STORAGE_KEYS.apiKey, (this.apiKey || '').trim());
+                llmStorageWrite(LLM_STORAGE_KEYS.apiBase, (this.apiBase || '').trim());
+                llmStorageWrite(LLM_STORAGE_KEYS.model, (this.modelName || '').trim());
+            },
+
+            buildLlmPayload() {
+                this.persistLlmConfig();
+                const payload = { api_key: this.apiKey, model: this.modelName || 'gpt-4o-mini' };
+                if (this.apiBase) payload.base_url = this.apiBase;
+                return payload;
+            },
+
+            buildFeParams() {
+                return {
+                    estimated_positive_rate: (parseFloat(this.estimatedRatePct) || 10) / 100,
+                    mi_feature_threshold: parseInt(this.miFeatureThreshold) || 100,
+                    stability_top_k: parseInt(this.stabilityTopK) || 50,
+                    stability_min_hits: parseInt(this.stabilityMinHits) || 2,
+                    stability_rus_ratio: parseFloat(this.stabilityRusRatio) || 0.15,
+                    stability_lgb_n_estimators: parseInt(this.stabilityLgbNEstimators) || 200,
+                    stability_lgb_learning_rate: parseFloat(this.stabilityLgbLearningRate) || 0.05,
+                    stability_lgb_max_depth: parseInt(this.stabilityLgbMaxDepth) || 6,
+                    stability_lgb_num_leaves: parseInt(this.stabilityLgbNumLeaves) || 31,
+                };
+            },
+
+            applyFeParams(p) {
+                if (!p) return;
+                if (p.stability_rus_ratio != null) this.stabilityRusRatio = p.stability_rus_ratio;
+                if (p.stability_lgb_n_estimators != null) this.stabilityLgbNEstimators = p.stability_lgb_n_estimators;
+                if (p.stability_lgb_learning_rate != null) this.stabilityLgbLearningRate = p.stability_lgb_learning_rate;
+                if (p.stability_lgb_max_depth != null) this.stabilityLgbMaxDepth = p.stability_lgb_max_depth;
+                if (p.stability_lgb_num_leaves != null) this.stabilityLgbNumLeaves = p.stability_lgb_num_leaves;
+            },
+
+            applyMlParams(p) {
+                if (!p) return;
+                if (p.learning_rate != null) this.learningRate = p.learning_rate;
+                if (p.n_estimators != null) this.nEstimators = p.n_estimators;
+                if (p.max_depth != null) this.maxDepth = p.max_depth;
+                if (p.min_child_samples != null) this.minChildSamples = p.min_child_samples;
+                if (p.subsample != null) this.subsample = p.subsample;
+                if (p.reg_alpha != null) this.regAlpha = p.reg_alpha;
+                if (p.reg_lambda != null) this.regLambda = p.reg_lambda;
+            },
+
+            async loadWorkflowContext() {
+                try {
+                    const res = await fetch('{{ url_for("data_tool.workflow_context") }}');
+                    const data = await res.json();
+                    if (!data.success) return;
+                    if (data.label_col) {
+                        this.labelCol = data.label_col;
+                    }
+                    const pu = data.pu || {};
+                    if (pu.dataset_type) {
+                        this.datasetType = pu.dataset_type;
+                    }
+                    if (pu.estimated_positive_rate_pct != null) {
+                        this.estimatedRatePct = pu.estimated_positive_rate_pct;
+                    }
+                } catch (e) {
+                    console.warn('loadWorkflowContext', e);
+                }
+            },
+            
+            applyCandidates(data) {
+                if (!data || !data.success || !data.candidates) return false;
+                this.candidates = this.sortCandidatesList(data.candidates);
+                this.meta = data.meta || null;
+                this.results = this.candidates;
+                this.hasResults = true;
+                this.loading = false;
+                return true;
+            },
+
+            async checkExistingResults() {
+                try {
+                    const res = await fetch('{{ url_for("data_tool.feature_selection_candidates") }}');
+                    if (res.ok) {
+                        this.canLoadOldResults = true;
+                        const data = await res.json();
+                        if (data.success && data.candidates && data.candidates.length) {
+                            this.applyCandidates(data);
+                            await this.loadConfirmedState();
+                        }
+                    }
+                } catch (e) {
+                    console.log('No existing results found');
+                }
+            },
+
+            async syncFeatureSelectionOnLoad() {
+                try {
+                    const res = await fetch('{{ url_for("data_tool.feature_selection_status") }}');
+                    const data = await res.json();
+                    if (!data.success) return;
+                    if (data.running) {
+                        this.loading = true;
+                        this.featureSelectionHandled = false;
+                        if (!this.featureSelectionPollTimer) {
+                            this.featureSelectionPollTimer = setInterval(
+                                () => this.pollFeatureSelectionStatus(),
+                                2000
+                            );
+                        }
+                        return;
+                    }
+                    this.loading = false;
+                    this.stopFeatureSelectionPoll();
+                    if (data.has_results && !this.hasResults) {
+                        await this.loadCandidates();
+                    }
+                } catch (e) {
+                    console.warn('syncFeatureSelectionOnLoad', e);
                 }
             },
             
@@ -275,18 +1058,22 @@
             },
 
             get filteredResults() {
-                if (!this.results) return [];
-                let res = this.results;
-                
+                const list = this.sortCandidatesList(this.candidates || this.results || []);
+                let res = list;
                 if (this.searchQuery) {
                     const q = this.searchQuery.toLowerCase();
-                    res = res.filter(r => 
-                        (r['特征名称（中文）'] && r['特征名称（中文）'].toLowerCase().includes(q)) ||
-                        (r['特征名称（英文）'] && r['特征名称（英文）'].toLowerCase().includes(q))
+                    res = res.filter(r =>
+                        (r.feature_zh && String(r.feature_zh).toLowerCase().includes(q)) ||
+                        (r.feature_en && String(r.feature_en).toLowerCase().includes(q)) ||
+                        (r['特征名称（中文）'] && String(r['特征名称（中文）']).toLowerCase().includes(q)) ||
+                        (r['特征名称（英文）'] && String(r['特征名称（英文）']).toLowerCase().includes(q))
                     );
                 }
-                
-                return this.showAll ? res : res.slice(0, 10);
+                return res;
+            },
+
+            toggleFeature(row) {
+                row.selected = !row.selected;
             },
 
             addLog(message, type = 'info') {
@@ -297,57 +1084,739 @@
                 });
             },
 
+            stopFeatureSelectionPoll() {
+                if (this.featureSelectionPollTimer) {
+                    clearInterval(this.featureSelectionPollTimer);
+                    this.featureSelectionPollTimer = null;
+                }
+            },
+
+            mergeFeatureSelectionLogs(serverLogs) {
+                if (!serverLogs || !serverLogs.length) return;
+                for (const entry of serverLogs) {
+                    const msg = entry.time ? `[${entry.time}] ${entry.message}` : entry.message;
+                    const exists = this.logs.some(l => l.message === msg && l.type === (entry.type || 'info'));
+                    if (!exists) {
+                        this.addLog(msg, entry.type || 'info');
+                    }
+                }
+            },
+
+            async finishFeatureSelection(data) {
+                if (this.featureSelectionHandled) return;
+                this.featureSelectionHandled = true;
+                this.stopFeatureSelectionPoll();
+                this.loading = false;
+
+                if (data.error) {
+                    this.addLog('运行失败: ' + data.error, 'error');
+                    window.dispatchEvent(new CustomEvent('notify', { detail: { message: data.error, type: 'error' } }));
+                    return;
+                }
+                if (!data.has_results) {
+                    this.addLog('任务已结束但未检测到结果文件，请点「加载历史结果」或重新运行', 'warning');
+                    return;
+                }
+                const n = data.candidate_count || '?';
+                if (!this.logs.some(l => l.message && l.message.includes('候选特征') && l.message.includes(String(n)))) {
+                    this.addLog(`完成，候选特征 ${n} 个`, 'success');
+                }
+                const loaded = await this.loadCandidates();
+                if (loaded) {
+                    window.dispatchEvent(new CustomEvent('notify', { detail: { message: '特征筛选完成，列表已更新', type: 'success' } }));
+                }
+            },
+
+            async pollFeatureSelectionStatus() {
+                if (this.featureSelectionHandled) return;
+                try {
+                    const res = await fetch(
+                        `{{ url_for("data_tool.feature_selection_status") }}?log_since=${this.featureSelectionLogOffset}`
+                    );
+                    const data = await res.json();
+                    if (!data.success) return;
+
+                    this.mergeFeatureSelectionLogs(data.logs);
+                    if (data.log_offset != null) {
+                        this.featureSelectionLogOffset = data.log_offset;
+                    }
+                    if (data.label_col) this.labelCol = data.label_col;
+                    if (data.dataset_type) this.datasetType = data.dataset_type;
+
+                    if (data.running) {
+                        this.loading = true;
+                        return;
+                    }
+
+                    await this.finishFeatureSelection(data);
+                } catch (e) {
+                    this.stopFeatureSelectionPoll();
+                    this.loading = false;
+                    this.featureSelectionHandled = true;
+                    this.addLog(this.formatFetchError(e), 'error');
+                }
+            },
+
+            formatFetchError(e) {
+                const msg = e && e.message ? e.message : String(e);
+                if (msg === 'Failed to fetch') {
+                    return '无法连接本地服务（Failed to fetch）：请确认 run.py 在运行且未因 debug 热重载中断；特征选择已在后台时可在终端查看 [feature_selection] 日志';
+                }
+                return '请求失败: ' + msg;
+            },
+
             async runFeatureSelection() {
+                if (!this.estimatedRatePct || this.estimatedRatePct <= 0) {
+                    window.dispatchEvent(new CustomEvent('notify', { detail: { message: '请填写预估正样本比例', type: 'warning' } }));
+                    return;
+                }
+                this.stopFeatureSelectionPoll();
                 this.loading = true;
+                this.featureSelectionHandled = false;
                 this.logs = [];
-                this.addLog('开始初始化特征选择流程...', 'info');
-                
+                this.featureSelectionLogOffset = 0;
+                this.featuresConfirmed = false;
+                this.selectionCollapsed = false;
+                this.confirmedFeatureCount = 0;
+                this.suggestRfecv = false;
+                this.mlComparison = null;
+                this.addLog('开始特征选择（PN + MI + LGB 稳定性）…', 'info');
+                this.addLog(`标签列: ${this.labelCol}（与 PU 训练同步）`, 'info');
+                this.addLog(`预估正样本比例: ${this.estimatedRatePct}%`, 'info');
+
                 try {
                     const res = await fetch('{{ url_for("data_tool.run_model_feature_selection") }}', {
-                        method: 'POST'
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            estimated_positive_rate: this.estimatedRatePct / 100,
+                            dataset_type: this.datasetType,
+                            fe_params: this.buildFeParams(),
+                        })
                     });
-                    const data = await res.json();
-                    
-                    if (data.log) {
-                        data.log.split('\n').forEach(line => {
-                            if (line.trim()) this.addLog(line);
-                        });
+                    let data;
+                    try {
+                        data = await res.json();
+                    } catch (parseErr) {
+                        throw new Error(`服务返回异常 (HTTP ${res.status})`);
                     }
-                    
-                    if (data.success) {
-                        this.addLog('特征筛选完成！', 'success');
-                        window.dispatchEvent(new CustomEvent('notify', { detail: { message: '特征筛选完成', type: 'success' } }));
-                        await this.loadResults();
-                    } else {
-                        this.addLog('运行失败: ' + (data.error || '未知错误'), 'error');
-                        if (data.stderr) {
-                             data.stderr.split('\n').forEach(line => {
-                                if (line.trim()) this.addLog(line, 'error');
-                            });
-                        }
+                    if (!res.ok || !data.success) {
+                        this.addLog('运行失败: ' + (data.error || `HTTP ${res.status}`), 'error');
+                        this.loading = false;
+                        return;
                     }
+                    if (data.label_col) this.labelCol = data.label_col;
+                    if (data.dataset_type) this.datasetType = data.dataset_type;
+                    this.addLog('任务已提交，正在后台运行（本页将自动刷新进度）…', 'info');
+                    this.featureSelectionPollTimer = setInterval(
+                        () => this.pollFeatureSelectionStatus(),
+                        2000
+                    );
+                    await this.pollFeatureSelectionStatus();
                 } catch (e) {
-                    this.addLog('网络请求错误: ' + e.message, 'error');
+                    this.addLog(this.formatFetchError(e), 'error');
+                    this.loading = false;
+                }
+            },
+
+            async loadCandidates() {
+                const controller = new AbortController();
+                const timer = setTimeout(() => controller.abort(), 60000);
+                try {
+                    const res = await fetch(
+                        '{{ url_for("data_tool.feature_selection_candidates") }}',
+                        { signal: controller.signal }
+                    );
+                    const data = await res.json();
+                    if (!res.ok || !data.success) {
+                        const err = data.error || `HTTP ${res.status}`;
+                        window.dispatchEvent(new CustomEvent('notify', { detail: { message: '加载候选列表失败: ' + err, type: 'error' } }));
+                        return false;
+                    }
+                    return this.applyCandidates(data);
+                } catch (e) {
+                    const msg = e.name === 'AbortError' ? '加载候选列表超时' : (e.message || String(e));
+                    window.dispatchEvent(new CustomEvent('notify', { detail: { message: msg, type: 'error' } }));
+                    console.error('loadCandidates', e);
+                    return false;
                 } finally {
+                    clearTimeout(timer);
                     this.loading = false;
                 }
             },
 
             async loadResults() {
+                await this.loadCandidates();
+                window.dispatchEvent(new CustomEvent('notify', { detail: { message: '已加载历史结果', type: 'info' } }));
+            },
+
+            async confirmFeatures() {
+                if (!this.candidates || !this.candidates.length) return;
+                const selected = this.candidates.filter(c => c.selected).map(c => c.feature_en);
+                if (!selected.length) {
+                    window.dispatchEvent(new CustomEvent('notify', { detail: { message: '请至少勾选一个特征', type: 'warning' } }));
+                    return;
+                }
+                this.confirming = true;
                 try {
-                    const res = await fetch('{{ url_for("data_tool.get_results_data") }}');
-                    if (res.ok) {
-                        const data = await res.json();
-                        if (Array.isArray(data)) {
-                            this.results = data;
-                            this.hasResults = true;
-                            // Reset loading state for button if needed, though this is load, not run
-                            window.dispatchEvent(new CustomEvent('notify', { detail: { message: '已加载历史运行结果', type: 'info' } }));
-                        }
+                    const res = await fetch('{{ url_for("data_tool.feature_selection_confirm") }}', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ selected_features: selected })
+                    });
+                    const data = await res.json();
+                    if (data.success) {
+                        this.featuresConfirmed = true;
+                        this.selectionCollapsed = true;
+                        this.confirmedFeatureCount = data.count || selected.length;
+                        await this.loadConfirmedState();
+                        window.dispatchEvent(new CustomEvent('notify', { detail: { message: `已确认 ${data.count} 个特征`, type: 'success' } }));
+                    } else {
+                        window.dispatchEvent(new CustomEvent('notify', { detail: { message: data.error || '确认失败', type: 'error' } }));
                     }
                 } catch (e) {
-                    console.error('Failed to load initial results');
+                    window.dispatchEvent(new CustomEvent('notify', { detail: { message: e.message, type: 'error' } }));
+                } finally {
+                    this.confirming = false;
                 }
+            },
+
+            stopMlPoll() {
+                if (this.mlPollTimer) {
+                    clearInterval(this.mlPollTimer);
+                    this.mlPollTimer = null;
+                }
+            },
+
+            mergeMlLogs(serverLogs) {
+                if (!serverLogs || !serverLogs.length) return;
+                for (const entry of serverLogs) {
+                    const msg = entry.time ? `[${entry.time}] ${entry.message}` : entry.message;
+                    if (!this.logs.some(l => l.message === msg)) {
+                        this.addLog(msg, entry.type || 'info');
+                    }
+                }
+            },
+
+            async pollMlStatus() {
+                if (this.mlHandled) return;
+                try {
+                    const res = await fetch(
+                        `{{ url_for("data_tool.mlbase_comparison_status") }}?log_since=${this.mlLogOffset}`
+                    );
+                    const data = await res.json();
+                    if (!data.success) return;
+                    this.mergeMlLogs(data.logs);
+                    if (data.log_offset != null) this.mlLogOffset = data.log_offset;
+                    if (data.running) {
+                        this.mlLoading = true;
+                        return;
+                    }
+                    this.mlHandled = true;
+                    this.stopMlPoll();
+                    this.mlLoading = false;
+                    if (data.error) {
+                        window.dispatchEvent(new CustomEvent('notify', { detail: { message: data.error, type: 'error' } }));
+                        return;
+                    }
+                    if (data.has_results && data.comparison) {
+                        this.mlComparison = data.comparison;
+                        this.suggestRfecv = !!data.suggest_rfecv;
+                        if (this.suggestRfecv) {
+                            this.addLog('全量特征精度高于 Top，可尝试 RFECV 重选', 'info');
+                        }
+                        await this.loadConfirmedState();
+                        window.dispatchEvent(new CustomEvent('notify', { detail: { message: 'ML 对比完成', type: 'success' } }));
+                    }
+                } catch (e) {
+                    this.mlHandled = true;
+                    this.stopMlPoll();
+                    this.mlLoading = false;
+                    window.dispatchEvent(new CustomEvent('notify', { detail: { message: this.formatFetchError(e), type: 'error' } }));
+                }
+            },
+
+            stopRfecvPoll() {
+                if (this.rfecvPollTimer) {
+                    clearInterval(this.rfecvPollTimer);
+                    this.rfecvPollTimer = null;
+                }
+            },
+
+            async pollRfecvStatus() {
+                if (this.rfecvHandled) return;
+                try {
+                    const res = await fetch(
+                        `{{ url_for("data_tool.rfecv_status") }}?log_since=${this.rfecvLogOffset}`
+                    );
+                    const data = await res.json();
+                    if (!data.success) return;
+                    this.mergeFeatureSelectionLogs(data.logs);
+                    if (data.log_offset != null) this.rfecvLogOffset = data.log_offset;
+                    if (data.running) {
+                        this.rfecvLoading = true;
+                        return;
+                    }
+                    this.rfecvHandled = true;
+                    this.stopRfecvPoll();
+                    this.rfecvLoading = false;
+                    if (data.error) {
+                        window.dispatchEvent(new CustomEvent('notify', { detail: { message: data.error, type: 'error' } }));
+                        return;
+                    }
+                    if (data.has_results) {
+                        this.featuresConfirmed = false;
+                        this.selectionCollapsed = false;
+                        this.confirmedFeatureCount = 0;
+                        this.suggestRfecv = false;
+                        await this.loadCandidates();
+                        window.dispatchEvent(new CustomEvent('notify', {
+                            detail: { message: 'RFECV 完成，请重新勾选并确认特征', type: 'success' }
+                        }));
+                    }
+                } catch (e) {
+                    this.rfecvHandled = true;
+                    this.stopRfecvPoll();
+                    this.rfecvLoading = false;
+                    window.dispatchEvent(new CustomEvent('notify', { detail: { message: this.formatFetchError(e), type: 'error' } }));
+                }
+            },
+
+            async runRfecvReselection() {
+                this.stopRfecvPoll();
+                this.rfecvLoading = true;
+                this.rfecvHandled = false;
+                this.rfecvLogOffset = 0;
+                this.addLog('提交 RFECV 重选任务…', 'info');
+                try {
+                    const res = await fetch('{{ url_for("data_tool.run_rfecv_reselection") }}', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ dataset_type: this.datasetType }),
+                    });
+                    const data = await res.json();
+                    if (!res.ok || !data.success) {
+                        this.rfecvLoading = false;
+                        window.dispatchEvent(new CustomEvent('notify', { detail: { message: data.error || '提交失败', type: 'error' } }));
+                        return;
+                    }
+                    this.rfecvPollTimer = setInterval(() => this.pollRfecvStatus(), 2000);
+                    await this.pollRfecvStatus();
+                } catch (e) {
+                    this.rfecvLoading = false;
+                    window.dispatchEvent(new CustomEvent('notify', { detail: { message: this.formatFetchError(e), type: 'error' } }));
+                }
+            },
+
+            stopMlTestPoll() {
+                if (this.mlTestPollTimer) {
+                    clearInterval(this.mlTestPollTimer);
+                    this.mlTestPollTimer = null;
+                }
+            },
+
+            buildMlRunBody() {
+                return {
+                    recall_target: parseFloat(this.recallTarget) || 0.5,
+                    reg_alpha: parseFloat(this.regAlpha) || 0.1,
+                    reg_lambda: parseFloat(this.regLambda) || 0.1,
+                    learning_rate: parseFloat(this.learningRate) || 0.05,
+                    n_estimators: parseInt(this.nEstimators) || 150,
+                    max_depth: parseInt(this.maxDepth) || 6,
+                    min_child_samples: parseInt(this.minChildSamples) || 50,
+                    subsample: parseFloat(this.subsample) || 0.8,
+                    dataset_type: this.datasetType,
+                    label_col: this.labelCol,
+                };
+            },
+
+            buildMlAutoresearchPayload() {
+                return {
+                    api_key: this.apiKey,
+                    model: this.modelName,
+                    variant: this.mlTestVariant,
+                    max_invalid_iterations: parseInt(this.mlMaxInvalidIterations) || 3,
+                    timeout_minutes: parseInt(this.mlAutoresearchTimeoutMinutes) || 20,
+                    ...this.buildMlRunBody(),
+                    ...(this.apiBase ? { base_url: this.apiBase } : {}),
+                };
+            },
+
+            attachMlAutoresearchSession(data) {
+                this.mlAutoresearchStarted = true;
+                this.mlAutoresearchActive = true;
+                this.mlAutoresearchRunning = !!data.running;
+                this.mlAutoresearchStopping = !!(data.stopping || data.stop_requested);
+                this.mlAutoresearchLogOffset = 0;
+                this.stopMlAutoresearchPolling();
+                this.mlAutoresearchPollTimer = setInterval(() => this.pollMlAutoresearchStatus(), 1000);
+            },
+
+            async restoreMlAutoresearchFromServer() {
+                try {
+                    const res = await fetch('{{ url_for("data_tool.mlbase_autoresearch_status") }}');
+                    const data = await res.json();
+                    if (!data.success || !data.running) return;
+                    this.attachMlAutoresearchSession(data);
+                    await this.pollMlAutoresearchStatus();
+                    this.addLog('已恢复 MLBase autoresearch 运行状态（可点击停止）', 'info');
+                } catch (e) {
+                    console.warn('restoreMlAutoresearchFromServer:', e);
+                }
+            },
+
+            stopMlAutoresearchPolling() {
+                if (this.mlAutoresearchPollTimer) {
+                    clearInterval(this.mlAutoresearchPollTimer);
+                    this.mlAutoresearchPollTimer = null;
+                }
+            },
+
+            mergeMlAutoresearchLogs(logs) {
+                if (!logs || !logs.length) return;
+                logs.forEach(entry => {
+                    const msg = entry.message || entry;
+                    const type = entry.type || 'info';
+                    if (typeof msg === 'string') this.addLog(msg, type);
+                });
+            },
+
+            async pollMlAutoresearchStatus() {
+                try {
+                    const res = await fetch(
+                        `{{ url_for("data_tool.mlbase_autoresearch_status") }}?since=${this.mlAutoresearchLogOffset}`
+                    );
+                    const data = await res.json();
+                    if (!data.success) return;
+
+                    this.mergeMlAutoresearchLogs(data.logs);
+                    this.mlAutoresearchLogOffset = data.log_offset ?? this.mlAutoresearchLogOffset;
+                    this.mlAutoresearchIteration = data.iteration ?? 0;
+                    this.mlAutoresearchBestPrecision = data.best_precision;
+                    this.mlAutoresearchInvalidStreak = data.invalid_streak ?? 0;
+                    this.mlAutoresearchStopping = !!(data.stopping || data.stop_requested);
+                    if (data.running) {
+                        this.mlAutoresearchRunning = true;
+                        this.mlAutoresearchActive = true;
+                    }
+                    if (data.current_params) {
+                        this.applyMlParams(data.current_params);
+                    }
+                    if (data.last_run_result && data.last_run_result.success) {
+                        await this.loadMlComparisonFromDisk();
+                    }
+
+                    if (!data.running && this.mlAutoresearchStarted) {
+                        this.mlAutoresearchRunning = false;
+                        this.mlAutoresearchActive = false;
+                        this.mlAutoresearchStarted = false;
+                        this.mlAutoresearchStopping = false;
+                        this.stopMlAutoresearchPolling();
+                        const reasonMap = {
+                            user_stop: '用户停止',
+                            max_invalid_iterations: '连续无效迭代达上限',
+                            error: '运行异常',
+                        };
+                        const msg = reasonMap[data.stop_reason] || data.stop_reason || '已结束';
+                        this.addLog(`MLBase autoresearch 结束: ${msg}`, data.stop_reason === 'max_invalid_iterations' ? 'warning' : 'info');
+                        window.dispatchEvent(new CustomEvent('notify', {
+                            detail: { message: 'MLBase autoresearch ' + msg, type: 'info' },
+                        }));
+                    }
+                } catch (e) {
+                    console.error(e);
+                }
+            },
+
+            async startMlAutoresearch() {
+                if (!this.apiKey) {
+                    window.dispatchEvent(new CustomEvent('notify', { detail: { message: '请输入 API Key', type: 'warning' } }));
+                    return;
+                }
+                if (!this.featuresConfirmed) {
+                    window.dispatchEvent(new CustomEvent('notify', { detail: { message: '请先确认特征', type: 'warning' } }));
+                    return;
+                }
+                this.persistLlmConfig();
+                this.stopMlAutoresearchPolling();
+                this.mlAutoresearchActive = true;
+                this.mlAutoresearchStarted = false;
+                this.mlAutoresearchRunning = true;
+                this.mlAutoresearchStopping = false;
+                this.mlAutoresearchLogOffset = 0;
+                this.mlAutoresearchIteration = 0;
+                this.mlAutoresearchBestPrecision = null;
+                this.mlAutoresearchInvalidStreak = 0;
+                this.addLog('启动 MLBase autoresearch…', 'info');
+
+                try {
+                    const res = await fetch('{{ url_for("data_tool.mlbase_autoresearch_start") }}', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(this.buildMlAutoresearchPayload()),
+                    });
+                    const data = await res.json();
+                    if (!data.success) {
+                        if ((data.error || '').includes('已在运行')) {
+                            this.attachMlAutoresearchSession({ running: true });
+                            await this.pollMlAutoresearchStatus();
+                            this.addLog('MLBase autoresearch 已在运行，已接入状态轮询', 'info');
+                            return;
+                        }
+                        this.mlAutoresearchActive = false;
+                        this.mlAutoresearchRunning = false;
+                        this.addLog(data.error || '启动失败', 'error');
+                        window.dispatchEvent(new CustomEvent('notify', { detail: { message: data.error || '启动失败', type: 'error' } }));
+                        return;
+                    }
+                    this.mlAutoresearchStarted = true;
+                    this.mlAutoresearchPollTimer = setInterval(() => this.pollMlAutoresearchStatus(), 1000);
+                    await this.pollMlAutoresearchStatus();
+                    window.dispatchEvent(new CustomEvent('notify', { detail: { message: 'MLBase autoresearch 已启动', type: 'success' } }));
+                } catch (e) {
+                    this.mlAutoresearchActive = false;
+                    this.mlAutoresearchRunning = false;
+                    this.addLog('启动请求错误: ' + e.message, 'error');
+                }
+            },
+
+            async stopMlAutoresearch() {
+                if (this.mlAutoresearchStopping) {
+                    this.addLog('停止请求已发送，请稍候…', 'info');
+                }
+                this.mlAutoresearchStopping = true;
+                this.mlAutoresearchActive = true;
+                this.addLog('正在发送停止请求…', 'warning');
+                try {
+                    const res = await fetch('{{ url_for("data_tool.mlbase_autoresearch_stop") }}', { method: 'POST' });
+                    const data = await res.json();
+                    if (data.success) {
+                        this.addLog(data.message || '停止信号已发送', 'warning');
+                        if (data.training_terminated) {
+                            this.addLog('训练子进程已终止，等待 autoresearch 退出…', 'info');
+                        } else {
+                            this.addLog('若处于 LLM 调用阶段，将在当前步骤结束后退出', 'info');
+                        }
+                        if (data.status) {
+                            this.mlAutoresearchRunning = !!data.status.running;
+                            this.mlAutoresearchStopping = !!(data.status.stopping || data.status.stop_requested);
+                        }
+                    } else {
+                        this.addLog(data.error || '停止失败', 'error');
+                    }
+                    await this.pollMlAutoresearchStatus();
+                } catch (e) {
+                    this.addLog('停止请求失败: ' + e.message, 'error');
+                } finally {
+                    if (!this.mlAutoresearchRunning) {
+                        this.mlAutoresearchStopping = false;
+                    }
+                }
+            },
+
+            async pollMlTestStatus() {
+                if (this.mlTestHandled) return;
+                try {
+                    const res = await fetch(
+                        `{{ url_for("data_tool.mlbase_test_status") }}?log_since=${this.mlTestLogOffset}`
+                    );
+                    const data = await res.json();
+                    if (!data.success) return;
+                    this.mergeMlLogs(data.logs);
+                    if (data.log_offset != null) this.mlTestLogOffset = data.log_offset;
+                    if (data.running) {
+                        this.mlTestLoading = true;
+                        return;
+                    }
+                    this.mlTestHandled = true;
+                    this.stopMlTestPoll();
+                    this.mlTestLoading = false;
+                    if (data.error) {
+                        window.dispatchEvent(new CustomEvent('notify', { detail: { message: data.error, type: 'error' } }));
+                        return;
+                    }
+                    if (data.has_results && data.metrics) {
+                        this.mlTestMetrics = data.metrics;
+                        await this.loadConfirmedState();
+                        window.dispatchEvent(new CustomEvent('notify', { detail: { message: 'Test 集评估完成', type: 'success' } }));
+                    }
+                } catch (e) {
+                    this.mlTestHandled = true;
+                    this.stopMlTestPoll();
+                    this.mlTestLoading = false;
+                    window.dispatchEvent(new CustomEvent('notify', { detail: { message: this.formatFetchError(e), type: 'error' } }));
+                }
+            },
+
+            async runMlTestEval() {
+                if (!this.mlComparison) {
+                    window.dispatchEvent(new CustomEvent('notify', { detail: { message: '请先完成 ML 对比', type: 'warning' } }));
+                    return;
+                }
+                if (this.mlTestVariant === 'top_features' && !(this.mlComparison.top_features)) {
+                    window.dispatchEvent(new CustomEvent('notify', { detail: { message: '无 Top 特征对比结果', type: 'warning' } }));
+                    return;
+                }
+                if (this.mlTestVariant === 'full_features' && !(this.mlComparison.full_features)) {
+                    window.dispatchEvent(new CustomEvent('notify', { detail: { message: '无全量特征对比结果', type: 'warning' } }));
+                    return;
+                }
+                this.stopMlTestPoll();
+                this.mlTestLoading = true;
+                this.mlTestHandled = false;
+                this.mlTestLogOffset = 0;
+                this.mlTestMetrics = null;
+                this.addLog(`提交 Test 评估（${this.mlTestVariant === 'top_features' ? 'Top' : '全量'}）…`, 'info');
+                try {
+                    const body = { ...this.buildMlRunBody(), variant: this.mlTestVariant };
+                    const res = await fetch('{{ url_for("data_tool.run_mlbase_test_eval") }}', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(body),
+                    });
+                    const data = await res.json();
+                    if (!res.ok || !data.success) {
+                        this.mlTestLoading = false;
+                        window.dispatchEvent(new CustomEvent('notify', { detail: { message: data.error || '提交失败', type: 'error' } }));
+                        return;
+                    }
+                    this.mlTestPollTimer = setInterval(() => this.pollMlTestStatus(), 2000);
+                    await this.pollMlTestStatus();
+                } catch (e) {
+                    this.mlTestLoading = false;
+                    window.dispatchEvent(new CustomEvent('notify', { detail: { message: this.formatFetchError(e), type: 'error' } }));
+                }
+            },
+
+            async runMlComparison() {
+                this.stopMlPoll();
+                this.stopMlTestPoll();
+                this.mlLoading = true;
+                this.mlHandled = false;
+                this.mlLogOffset = 0;
+                this.mlComparison = null;
+                this.mlTestMetrics = null;
+                this.addLog('提交 ML 对比（全量 vs Top 特征）…', 'info');
+                try {
+                    const res = await fetch('{{ url_for("data_tool.run_mlbase_comparison") }}', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(this.buildMlRunBody()),
+                    });
+                    const data = await res.json();
+                    if (!res.ok || !data.success) {
+                        this.mlLoading = false;
+                        window.dispatchEvent(new CustomEvent('notify', { detail: { message: data.error || '提交失败', type: 'error' } }));
+                        return;
+                    }
+                    this.addLog('ML 对比已在后台运行（全量/Top 各单次训练）', 'info');
+                    this.mlPollTimer = setInterval(() => this.pollMlStatus(), 3000);
+                    await this.pollMlStatus();
+                } catch (e) {
+                    this.mlLoading = false;
+                    window.dispatchEvent(new CustomEvent('notify', { detail: { message: this.formatFetchError(e), type: 'error' } }));
+                }
+            },
+
+            async optimizeFeParams() {
+                console.log('optimizeFeParams');
+                if (!this.apiKey) {
+                    this.addLog('请先配置 API Key', 'warning');
+                    window.dispatchEvent(new CustomEvent('notify', { detail: { message: '请输入 API Key', type: 'warning' } }));
+                    return;
+                }
+                this.persistLlmConfig();
+                this.feOptimizing = true;
+                this.feReasoning = '';
+                this.addLog('正在调用大模型推荐特征选择参数…', 'info');
+                try {
+                    const res = await fetch('{{ url_for("data_tool.optimize_fe_params") }}', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(this.buildLlmPayload()),
+                    });
+                    const data = await res.json();
+                    if (data.success && data.params) {
+                        this.applyFeParams(data.params);
+                        this.feReasoning = data.reasoning || '';
+                        this.addLog('特征选择参数推荐成功', 'success');
+                        window.dispatchEvent(new CustomEvent('notify', { detail: { message: '特征选择参数推荐成功', type: 'success' } }));
+                    } else {
+                        const err = data.error || '推荐失败';
+                        this.addLog(err, 'error');
+                        window.dispatchEvent(new CustomEvent('notify', { detail: { message: err, type: 'error' } }));
+                    }
+                } catch (e) {
+                    this.addLog('请求错误: ' + e.message, 'error');
+                    window.dispatchEvent(new CustomEvent('notify', { detail: { message: '请求错误: ' + e.message, type: 'error' } }));
+                } finally {
+                    this.feOptimizing = false;
+                }
+            },
+
+            async optimizeMlParams() {
+                console.log('optimizeMlParams');
+                if (!this.apiKey) {
+                    this.addLog('请先配置 API Key', 'warning');
+                    window.dispatchEvent(new CustomEvent('notify', { detail: { message: '请输入 API Key', type: 'warning' } }));
+                    return;
+                }
+                if (!this.featuresConfirmed) {
+                    this.addLog('请先确认特征后再使用 MLBase 参数推荐', 'warning');
+                    window.dispatchEvent(new CustomEvent('notify', { detail: { message: '请先确认特征', type: 'warning' } }));
+                    return;
+                }
+                this.persistLlmConfig();
+                this.mlOptimizing = true;
+                this.mlReasoning = '';
+                this.addLog('正在调用大模型推荐 MLBase 参数…', 'info');
+                try {
+                    const res = await fetch('{{ url_for("data_tool.optimize_mlbase_params") }}', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(this.buildLlmPayload()),
+                    });
+                    const data = await res.json();
+                    if (data.success && data.params) {
+                        this.applyMlParams(data.params);
+                        this.mlReasoning = data.reasoning || '';
+                        this.addLog('MLBase 参数推荐成功', 'success');
+                        window.dispatchEvent(new CustomEvent('notify', { detail: { message: 'MLBase 参数推荐成功', type: 'success' } }));
+                    } else {
+                        const err = data.error || '推荐失败';
+                        this.addLog(err, 'error');
+                        window.dispatchEvent(new CustomEvent('notify', { detail: { message: err, type: 'error' } }));
+                    }
+                } catch (e) {
+                    this.addLog('请求错误: ' + e.message, 'error');
+                    window.dispatchEvent(new CustomEvent('notify', { detail: { message: '请求错误: ' + e.message, type: 'error' } }));
+                } finally {
+                    this.mlOptimizing = false;
+                }
+            },
+
+            resetFeParams() {
+                const d = this.defaultFeAiParams;
+                this.stabilityRusRatio = d.stabilityRusRatio;
+                this.stabilityLgbNEstimators = d.stabilityLgbNEstimators;
+                this.stabilityLgbLearningRate = d.stabilityLgbLearningRate;
+                this.stabilityLgbMaxDepth = d.stabilityLgbMaxDepth;
+                this.stabilityLgbNumLeaves = d.stabilityLgbNumLeaves;
+                this.feReasoning = '';
+                window.dispatchEvent(new CustomEvent('notify', { detail: { message: '特征选择模型超参已重置', type: 'info' } }));
+            },
+
+            resetMlParams() {
+                const d = this.defaultMlAiParams;
+                this.regAlpha = d.regAlpha;
+                this.regLambda = d.regLambda;
+                this.learningRate = d.learningRate;
+                this.nEstimators = d.nEstimators;
+                this.maxDepth = d.maxDepth;
+                this.minChildSamples = d.minChildSamples;
+                this.subsample = d.subsample;
+                this.mlReasoning = '';
+                window.dispatchEvent(new CustomEvent('notify', { detail: { message: 'MLBase 模型超参已重置', type: 'info' } }));
             }
         }
     }

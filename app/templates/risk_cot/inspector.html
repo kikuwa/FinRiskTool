@@ -202,7 +202,7 @@
                             <thead class="bg-slate-50 text-slate-500 font-bold text-xs sticky top-0 z-10">
                                 <tr>
                                     <th class="px-6 py-3 w-20">ID</th>
-                                    <th class="px-6 py-3 w-32">评分/结果</th>
+                                    <th class="px-6 py-3 w-32">结果</th>
                                     <th class="px-6 py-3">Instruction</th>
                                     <th class="px-6 py-3 w-1/3">Output Preview</th>
                                     <th class="px-6 py-3 w-24 text-right">操作</th>
@@ -214,11 +214,22 @@
                                         <td class="px-6 py-4 font-mono text-xs text-slate-500" x-text="(pagination.page - 1) * pagination.per_page + idx + 1"></td>
                                         <td class="px-6 py-4">
                                             <div class="flex items-center">
-                                                <span class="text-lg font-black mr-2" 
-                                                      :class="getScoreColor(item.score)">
-                                                    <span x-text="item.score"></span>
-                                                </span>
-                                                <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Score</span>
+                                                <!-- 规则质检：显示 goodcase/badcase -->
+                                                <template x-if="item.inspection_type === 'rule_based'">
+                                                    <span class="px-2 py-1 rounded text-xs font-bold" 
+                                                          :class="item.score >= 10 ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'"
+                                                          x-text="item.score >= 10 ? 'goodcase' : 'badcase'">
+                                                    </span>
+                                                </template>
+                                                <!-- 模型质检：显示具体分数 -->
+                                                <template x-if="item.inspection_type === 'model_based'">
+                                                    <div class="flex items-center">
+                                                        <span class="text-lg font-black mr-1" 
+                                                              :class="getScoreColor(item.score)"
+                                                              x-text="item.score"></span>
+                                                        <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">分</span>
+                                                    </div>
+                                                </template>
                                             </div>
                                         </td>
                                         <td class="px-6 py-4">
@@ -283,18 +294,33 @@
                         </button>
                     </div>
                     
-                    <div class="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar" x-data="{ currentItem: selectedItem }">
-                        <template x-if="currentItem">
+                    <div class="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar">
+                        <template x-if="selectedItem">
                             <div>
                                 <!-- Score Banner -->
                                 <div class="flex items-center justify-between bg-gradient-to-r from-slate-50 to-white p-6 rounded-2xl border border-slate-100 mb-6 shadow-sm">
                                     <div>
-                                        <div class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">最终得分</div>
-                                        <div class="text-4xl font-black" :class="getScoreColor(currentItem.score)" x-text="currentItem.score"></div>
+                                        <!-- 规则质检：显示结果和 goodcase/badcase -->
+                                        <template x-if="selectedItem.inspection_type === 'rule_based'">
+                                            <div>
+                                                <div class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">结果</div>
+                                                <div class="px-3 py-1 rounded text-sm font-bold inline-block" 
+                                                     :class="selectedItem.score >= 10 ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'"
+                                                     x-text="selectedItem.score >= 10 ? 'goodcase' : 'badcase'">
+                                                </div>
+                                            </div>
+                                        </template>
+                                        <!-- 模型质检：显示评分和具体分数 -->
+                                        <template x-if="selectedItem.inspection_type === 'model_based'">
+                                            <div>
+                                                <div class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">评分</div>
+                                                <div class="text-4xl font-black" :class="getScoreColor(selectedItem.score)" x-text="selectedItem.score"></div>
+                                            </div>
+                                        </template>
                                     </div>
                                     <div class="text-right">
                                         <div class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">质检类型</div>
-                                        <div class="font-bold text-slate-800 bg-white px-3 py-1 rounded-lg border border-slate-200 shadow-sm inline-block" x-text="currentItem.inspection_type === 'rule_based' ? '规则质检' : '模型打分'"></div>
+                                        <div class="font-bold text-slate-800 bg-white px-3 py-1 rounded-lg border border-slate-200 shadow-sm inline-block" x-text="selectedItem.inspection_type === 'rule_based' ? '规则质检' : '模型打分'"></div>
                                     </div>
                                 </div>
 
@@ -304,19 +330,19 @@
                                         <h4 class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2 flex items-center gap-1">
                                             <span class="material-symbols-outlined text-[16px]">integration_instructions</span> Instruction
                                         </h4>
-                                        <div class="bg-slate-50 p-4 rounded-xl border border-slate-100 text-sm text-slate-700 leading-relaxed whitespace-pre-wrap shadow-inner" x-text="currentItem.instruction"></div>
+                                        <div class="bg-slate-50 p-4 rounded-xl border border-slate-100 text-sm text-slate-700 leading-relaxed whitespace-pre-wrap shadow-inner" x-text="selectedItem.instruction"></div>
                                     </div>
                                     <div>
                                         <h4 class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2 flex items-center gap-1">
                                             <span class="material-symbols-outlined text-[16px]">input</span> Input
                                         </h4>
-                                        <div class="bg-slate-50 p-4 rounded-xl border border-slate-100 text-sm text-slate-700 leading-relaxed whitespace-pre-wrap shadow-inner" x-text="currentItem.input"></div>
+                                        <div class="bg-slate-50 p-4 rounded-xl border border-slate-100 text-sm text-slate-700 leading-relaxed whitespace-pre-wrap shadow-inner" x-text="selectedItem.input"></div>
                                     </div>
                                     <div>
                                         <h4 class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2 flex items-center gap-1">
                                             <span class="material-symbols-outlined text-[16px]">output</span> Output
                                         </h4>
-                                        <div class="bg-slate-50 p-4 rounded-xl border border-slate-100 text-sm text-slate-700 leading-relaxed whitespace-pre-wrap shadow-inner font-mono" x-text="currentItem.output"></div>
+                                        <div class="bg-slate-50 p-4 rounded-xl border border-slate-100 text-sm text-slate-700 leading-relaxed whitespace-pre-wrap shadow-inner font-mono" x-text="selectedItem.output"></div>
                                     </div>
                                 </div>
                                 
@@ -324,44 +350,42 @@
                                 <div class="mt-8 border-t border-slate-100 pt-6">
                                     <h4 class="text-sm font-bold text-slate-800 mb-4 flex items-center gap-2">
                                         <span class="material-symbols-outlined text-orange-500 text-[18px]">fact_check</span>
-                                        评分详情/原因
+                                        失败规则
                                     </h4>
-                                    <template x-if="currentItem.inspection_type === 'rule_based'">
+                                    <template x-if="selectedItem.inspection_type === 'rule_based'">
                                         <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                            <template x-for="(val, key) in currentItem.rule_details" :key="key">
-                                                <div class="flex justify-between items-center p-3 rounded-xl border transition-colors" 
-                                                     :class="val === true ? 'bg-green-50 border-green-100' : (val === false ? 'bg-red-50 border-red-100' : 'bg-slate-50 border-slate-100')">
-                                                    <span class="text-xs font-mono font-medium text-slate-600" x-text="key"></span>
+                                            <template x-for="([key, val]) in getFailedRules(selectedItem.rule_details)" :key="key">
+                                                <div class="flex justify-between items-center p-3 rounded-xl border bg-red-50 border-red-100 transition-colors">
+                                                    <div class="flex flex-col">
+                                                        <span class="text-xs font-medium text-slate-700" x-text="getRuleName(key)"></span>
+                                                        <span class="text-[10px] text-slate-400 font-mono" x-text="key"></span>
+                                                    </div>
                                                     <div class="flex items-center gap-1">
-                                                        <span class="material-symbols-outlined text-[16px]" 
-                                                              :class="val === true ? 'text-green-500' : (val === false ? 'text-red-500' : 'text-slate-400')"
-                                                              x-text="val === true ? 'check_circle' : (val === false ? 'cancel' : 'help')"></span>
-                                                        <span class="text-xs font-bold uppercase" 
-                                                              :class="val === true ? 'text-green-700' : (val === false ? 'text-red-700' : 'text-slate-500')"
-                                                              x-text="val === true ? 'PASS' : (val === false ? 'FAIL' : 'N/A')"></span>
+                                                        <span class="material-symbols-outlined text-[16px] text-red-500" x-text="'cancel'"></span>
+                                                        <span class="text-xs font-bold uppercase text-red-700" x-text="'FAIL'"></span>
                                                     </div>
                                                 </div>
                                             </template>
                                         </div>
                                     </template>
-                                    <template x-if="currentItem.inspection_type === 'model_based'">
-                                        <div class="bg-blue-50 p-4 rounded-xl border border-blue-100 text-sm text-blue-900 leading-relaxed shadow-sm flex gap-3">
-                                            <span class="material-symbols-outlined text-blue-500 shrink-0">psychology</span>
-                                            <span x-text="currentItem.model_reason || '无详细评价'"></span>
+                                    <div x-if="selectedItem.inspection_type === 'model_based'" class="bg-blue-50 p-4 rounded-xl border border-blue-100 text-sm text-blue-900 leading-relaxed shadow-sm flex gap-3">
+                                        <span class="material-symbols-outlined text-blue-500 shrink-0">psychology</span>
+                                        <span x-text="selectedItem.model_reason || '无详细评价'"></span>
+                                    </div>
+                                    <div x-if="selectedItem.error" class="bg-red-50 p-4 rounded-xl border border-red-100 text-sm text-red-900 mt-4 flex gap-3">
+                                        <span class="material-symbols-outlined text-red-500 shrink-0">error</span>
+                                        <div>
+                                            <div class="font-bold">Error Occurred</div>
+                                            <div x-text="selectedItem.error"></div>
                                         </div>
-                                    </template>
-                                    <template x-if="currentItem.error">
-                                        <div class="bg-red-50 p-4 rounded-xl border border-red-100 text-sm text-red-900 mt-4 flex gap-3">
-                                            <span class="material-symbols-outlined text-red-500 shrink-0">error</span>
-                                            <div>
-                                                <div class="font-bold">Error Occurred</div>
-                                                <div x-text="currentItem.error"></div>
-                                            </div>
-                                        </div>
-                                    </template>
+                                    </div>
                                 </div>
                             </div>
                         </template>
+                        <div x-if="!selectedItem" class="text-center py-12">
+                            <span class="material-symbols-outlined text-slate-300 text-4xl">search_off</span>
+                            <p class="text-slate-400 mt-4">暂无数据</p>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -385,10 +409,18 @@
                 { key: 'fk_answer_exist', label: '回答是否存在' },
                 { key: 'is_number', label: '数字格式检查' },
                 { key: 'no_text_truncated', label: '无截断文本' },
+                { key: 'no_incomplete_content', label: '内容完整' },
+                { key: 'no_chinese_english_mix', label: '无中英文混排' },
                 { key: 'no_repeat_content', label: '无重复内容' },
+                { key: 'no_repeat_pattern', label: '无重复模式' },
+                { key: 'no_unclose_paire', label: '括号配对完整' },
+                { key: 'no_crashed_str', label: '无乱码字符' },
+                { key: 'no_chinese_English_space', label: '中英文空格规范' },
+                { key: 'no_other_gpt_keywords', label: '无其他模型关键词' },
+                { key: 'no_think', label: '无空思考标签' },
                 { key: 'fk_answer_yes_or_no', label: '是否回答Yes/No' },
                 { key: 'fk_answer_equal', label: '回答与GT一致' },
-                { key: 'no_chinese_english_mix', label: '无中英混杂' }
+                { key: 'all_math_answer_equal', label: '数学答案正确' }
             ],
             selectedRules: ['fk_answer_exist', 'fk_answer_yes_or_no', 'fk_answer_equal'],
             
@@ -557,6 +589,42 @@
                 if (score >= 8) return 'text-green-600';
                 if (score >= 6) return 'text-yellow-600';
                 return 'text-red-600';
+            },
+            
+            getRuleName(key) {
+                const ruleNames = {
+                    'is_number': '非纯数字检查',
+                    'no_text_truncated': '文本未截断',
+                    'no_incomplete_content': '内容完整',
+                    'no_chinese_english_mix': '无中英文混排',
+                    'no_repeat_content': '无重复内容',
+                    'no_unclose_paire': '括号配对完整',
+                    'no_repeat_pattern': '无重复模式',
+                    'no_crashed_str': '无乱码字符',
+                    'no_chinese_English_space': '中英文空格规范',
+                    'no_other_gpt_keywords': '无其他模型关键词',
+                    'no_think': '无空思考标签',
+                    'all_math_answer_equal': '数学答案正确',
+                    'fk_answer_exist': '答案存在',
+                    'fk_answer_yes_or_no': '答案为是/否',
+                    'fk_answer_equal': '答案匹配参考',
+                    'warning': '警告信息',
+                    'assistant_content': '助手回复',
+                    'enabled_rules': '启用规则'
+                };
+                return ruleNames[key] || key;
+            },
+            
+            getInspectionTypeName(type) {
+                return type === 'rule_based' ? '规则质检' : '模型打分';
+            },
+            
+            getFailedRules(ruleDetails) {
+                if (!ruleDetails) return [];
+                return Object.entries(ruleDetails).filter(([key, val]) => {
+                    // 只包含布尔类型的规则字段，且值为 false（失败）
+                    return typeof val === 'boolean' && val === false && key !== 'warning';
+                });
             },
             
             showDetail(item) {
