@@ -1,13 +1,49 @@
 from flask import Blueprint, request, jsonify, current_app
 from werkzeug.utils import secure_filename
-from app.services.risk_cot.data_factory import RiskDataFactory
 from app.services.risk_cot.prompt_engine import PromptEngine
 import os
 import uuid
 import pandas as pd
 import json
+import numpy as np
 
 generator_bp = Blueprint('generator', __name__, url_prefix='/api/generator')
+
+def clean_for_json(obj):
+    """将对象中的 NaN, Inf, -Inf 转换为 None，以便 JSON 序列化"""
+    if isinstance(obj, dict):
+        return {k: clean_for_json(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [clean_for_json(item) for item in obj]
+    elif isinstance(obj, float):
+        if np.isnan(obj) or np.isinf(obj):
+            return None
+        return obj
+    return obj
+
+@generator_bp.route('/check_train_data', methods=['GET'])
+def check_train_data():
+    train_files = ['train.csv', 'train_dataset.csv']
+    data_folder = current_app.config['DATA_FOLDER']
+    
+    for display_name in train_files:
+        file_path = os.path.join(data_folder, display_name)
+        if os.path.exists(file_path):
+            try:
+                df = pd.read_csv(file_path)
+                preview = df.head(5).where(pd.notnull(df), None).to_dict(orient='records')
+                preview = clean_for_json(preview)
+                return jsonify({
+                    'status': 'success',
+                    'exists': True,
+                    'filename': display_name,
+                    'display_name': display_name,
+                    'preview': preview
+                })
+            except Exception as e:
+                continue
+    
+    return jsonify({'status': 'success', 'exists': False})
 
 @generator_bp.route('/upload', methods=['POST'])
 def upload_data():
@@ -39,6 +75,8 @@ def upload_data():
                  
             # Convert NaN to None for JSON compatibility
             preview = df.head(5).where(pd.notnull(df), None).to_dict(orient='records')
+            # Clean NaN, Inf values for JSON serialization
+            preview = clean_for_json(preview)
             
             return jsonify({
                 'status': 'success',
@@ -48,36 +86,6 @@ def upload_data():
             })
         except Exception as e:
              return jsonify({'status': 'error', 'message': f'Failed to process file: {str(e)}'}), 500
-
-@generator_bp.route('/mock', methods=['POST'])
-def generate_mock_data():
-    try:
-        num_samples = int(request.json.get('num_samples', 100))
-        # Unique filename to avoid conflicts
-        task_id = str(uuid.uuid4())[:8]
-        filename = f"mock_risk_data_{task_id}.csv"
-        output_dir = current_app.config['DATA_FOLDER']
-        
-        # Run generation
-        df = RiskDataFactory.generate_data(num_samples=num_samples)
-        
-        # Save to file
-        file_path = os.path.join(output_dir, filename)
-        df.to_csv(file_path, index=False, encoding='utf-8-sig')
-        
-        # Preview data (first 5 rows)
-        # Convert NaN to None for JSON compatibility
-        preview = df.head(5).where(pd.notnull(df), None).to_dict(orient='records')
-        
-        return jsonify({
-            'status': 'success',
-            'message': f'成功生成 {num_samples} 条数据',
-            'file_path': str(file_path),
-            'filename': filename,
-            'preview': preview
-        })
-    except Exception as e:
-        return jsonify({'status': 'error', 'message': str(e)}), 500
 
 @generator_bp.route('/template/default', methods=['GET'])
 def get_default_template():
