@@ -80,7 +80,7 @@ def cmd_autoresearch_start(args) -> None:
         project_root = app.config['PROJECT_ROOT']
         log_folder = app.config.get('LOG_FOLDER', os.path.join(project_root, 'logs'))
         result = start_autoresearch(
-            app._get_current_object(),
+            app,
             api_key=api_key,
             base_url=args.base_url or os.environ.get('OPENAI_BASE_URL'),
             model=args.model or os.environ.get('PU_PARAM_LLM_MODEL', 'gpt-4o-mini'),
