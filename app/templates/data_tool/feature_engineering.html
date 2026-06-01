@@ -13,7 +13,7 @@
 {% endblock %}
 
 {% block content %}
-<div class="max-w-[1400px] mx-auto w-full space-y-6" x-data="featureEngineeringApp()">
+<div class="max-w-[1400px] mx-auto w-full space-y-6" x-data="featureEngineeringApp()" x-init="init()">
     
     <!-- Hero / Header -->
     <div class="relative bg-white rounded-2xl p-8 shadow-sm border border-slate-200 overflow-hidden mb-6">
@@ -575,52 +575,6 @@
 
 {% block scripts %}
 <script>
-    const LLM_STORAGE_KEYS = {
-        apiKey: 'finrisk_llm_api_key',
-        apiBase: 'finrisk_llm_api_base',
-        model: 'finrisk_llm_model',
-        serverBoot: 'finrisk_llm_server_boot_id',
-    };
-
-    function getServerBootId() {
-        const meta = document.querySelector('meta[name="finrisk-server-boot-id"]');
-        return meta ? (meta.getAttribute('content') || '') : '';
-    }
-
-    function clearLlmConfigStorage() {
-        Object.values(LLM_STORAGE_KEYS).forEach((k) => {
-            try {
-                localStorage.removeItem(k);
-                sessionStorage.removeItem(k);
-            } catch (e) { /* private mode */ }
-        });
-    }
-
-    function llmStorageRead(key) {
-        try {
-            return localStorage.getItem(key);
-        } catch (e) { /* private mode */ }
-        return null;
-    }
-
-    function llmStorageWrite(key, value) {
-        try {
-            if (value) localStorage.setItem(key, value);
-            else localStorage.removeItem(key);
-        } catch (e) { /* private mode */ }
-    }
-
-    /** 若 run.py 已重启则清空凭证；返回 true 表示本轮进程内可加载缓存 */
-    function syncLlmConfigBootId() {
-        const current = getServerBootId();
-        if (!current) return true;
-        const stored = llmStorageRead(LLM_STORAGE_KEYS.serverBoot);
-        if (stored === current) return true;
-        clearLlmConfigStorage();
-        llmStorageWrite(LLM_STORAGE_KEYS.serverBoot, current);
-        return false;
-    }
-
     function featureEngineeringApp() {
         return {
             loading: false,
@@ -871,26 +825,24 @@
             },
 
             loadLlmConfigFromStorage() {
-                if (!syncLlmConfigBootId()) {
+                const cfg = window.loadLlmConfigFromStorage();
+                if (!cfg) {
                     this.apiKey = '';
                     this.apiBase = '';
                     this.modelName = 'gpt-4o-mini';
                     return;
                 }
-                const key = llmStorageRead(LLM_STORAGE_KEYS.apiKey);
-                const base = llmStorageRead(LLM_STORAGE_KEYS.apiBase);
-                const model = llmStorageRead(LLM_STORAGE_KEYS.model);
-                if (key) this.apiKey = key;
-                if (base) this.apiBase = base;
-                if (model) this.modelName = model;
+                if (cfg.apiKey) this.apiKey = cfg.apiKey;
+                if (cfg.apiBase) this.apiBase = cfg.apiBase;
+                if (cfg.modelName) this.modelName = cfg.modelName;
             },
 
             persistLlmConfig() {
-                const boot = getServerBootId();
-                if (boot) llmStorageWrite(LLM_STORAGE_KEYS.serverBoot, boot);
-                llmStorageWrite(LLM_STORAGE_KEYS.apiKey, (this.apiKey || '').trim());
-                llmStorageWrite(LLM_STORAGE_KEYS.apiBase, (this.apiBase || '').trim());
-                llmStorageWrite(LLM_STORAGE_KEYS.model, (this.modelName || '').trim());
+                window.persistLlmConfig({
+                    apiKey: this.apiKey,
+                    apiBase: this.apiBase,
+                    modelName: this.modelName,
+                });
             },
 
             buildLlmPayload() {
@@ -1078,6 +1030,9 @@
 
             addLog(message, type = 'info') {
                 this.logs.push({ message, type });
+                if (window.emitClientLog) {
+                    window.emitClientLog('feature_engineering', type, message);
+                }
                 this.$nextTick(() => {
                     const container = this.$refs.logContainer;
                     if (container) container.scrollTop = container.scrollHeight;
@@ -1230,6 +1185,13 @@
                     const data = await res.json();
                     if (!res.ok || !data.success) {
                         const err = data.error || `HTTP ${res.status}`;
+                        if (
+                            res.status === 404 &&
+                            err.includes('请先运行特征筛选')
+                        ) {
+                            this.addLog('暂无候选列表，请先运行特征筛选', 'info');
+                            return false;
+                        }
                         window.dispatchEvent(new CustomEvent('notify', { detail: { message: '加载候选列表失败: ' + err, type: 'error' } }));
                         return false;
                     }

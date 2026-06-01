@@ -13,7 +13,7 @@
 {% endblock %}
 
 {% block content %}
-<div class="max-w-[1400px] mx-auto w-full space-y-6" x-data="inferenceApp()">
+<div class="max-w-[1400px] mx-auto w-full space-y-6" x-data="inferenceApp()" x-init="init()">
     
     <!-- Top Control Bar -->
     <div class="relative bg-white rounded-2xl p-8 shadow-sm border border-slate-200 overflow-hidden">
@@ -73,18 +73,18 @@
                 <div class="space-y-4">
                     <div>
                         <label class="block text-xs font-bold text-slate-500 mb-2 uppercase tracking-wider">API Key</label>
-                        <input type="password" x-model="apiKey" class="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 outline-none transition-all text-sm font-mono text-slate-700 placeholder-slate-400">
+                        <input type="password" x-model="apiKey" @input="persistLlmConfig()" @change="persistLlmConfig()" class="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 outline-none transition-all text-sm font-mono text-slate-700 placeholder-slate-400">
                     </div>
 
                     <div>
                         <label class="block text-xs font-bold text-slate-500 mb-2 uppercase tracking-wider">API Base URL</label>
-                        <input type="text" x-model="apiBase" class="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 outline-none transition-all text-sm font-mono text-slate-700 placeholder-slate-400" placeholder="https://api.deepseek.com/chat/completions">
+                        <input type="text" x-model="apiBase" @input="persistLlmConfig()" @change="persistLlmConfig()" class="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 outline-none transition-all text-sm font-mono text-slate-700 placeholder-slate-400" placeholder="https://api.deepseek.com/chat/completions">
                     </div>
 
                     <div class="grid grid-cols-2 gap-4">
                         <div>
                             <label class="block text-xs font-bold text-slate-500 mb-2 uppercase tracking-wider">模型名称</label>
-                            <input type="text" x-model="modelName" class="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 outline-none transition-all text-sm font-mono text-slate-700" placeholder="deepseek-reasoner">
+                            <input type="text" x-model="modelName" @input="persistLlmConfig()" @change="persistLlmConfig()" class="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 outline-none transition-all text-sm font-mono text-slate-700" placeholder="deepseek-reasoner">
                         </div>
                         <div>
                             <label class="block text-xs font-bold text-slate-500 mb-2 uppercase tracking-wider">并发线程</label>
@@ -196,8 +196,27 @@
             eventSource: null,
 
             init() {
+                this.loadLlmConfigFromStorage();
                 this.loadLastFile();
                 this.connectStream();
+            },
+
+            loadLlmConfigFromStorage() {
+                const cfg = window.loadLlmConfigFromStorage();
+                if (!cfg) return;
+                if (cfg.apiKey) this.apiKey = cfg.apiKey;
+                if (cfg.modelName) this.modelName = cfg.modelName;
+                if (cfg.apiBase) {
+                    this.apiBase = window.toChatCompletionsUrl(cfg.apiBase);
+                }
+            },
+
+            persistLlmConfig() {
+                window.persistLlmConfig({
+                    apiKey: this.apiKey,
+                    apiBase: this.apiBase,
+                    modelName: this.modelName,
+                });
             },
 
             loadLastFile() {
@@ -264,7 +283,11 @@
             },
 
             addLog(msg) {
-                this.logs.push(`${new Date().toLocaleTimeString()} ${msg}`);
+                const line = `${new Date().toLocaleTimeString()} ${msg}`;
+                this.logs.push(line);
+                if (window.emitClientLog) {
+                    window.emitClientLog('cot_inference', 'info', line);
+                }
                 // Auto scroll
                 this.$nextTick(() => {
                     const container = document.getElementById('log-container');
@@ -278,6 +301,7 @@
                     return;
                 }
 
+                this.persistLlmConfig();
                 this.logs = []; // Clear logs
                 this.addLog('正在启动任务...');
                 
@@ -288,7 +312,7 @@
                         body: JSON.stringify({
                             input_file: this.inputFile,
                             api_key: this.apiKey,
-                            base_url: this.apiBase,
+                            base_url: window.toChatCompletionsUrl(this.apiBase),
                             model: this.modelName,
                             workers: this.workers
                         })

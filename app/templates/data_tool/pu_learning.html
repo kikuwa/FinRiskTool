@@ -13,7 +13,7 @@
 {% endblock %}
 
 {% block content %}
-<div class="max-w-[1400px] mx-auto w-full space-y-6" x-data="puLearningApp()">
+<div class="max-w-[1400px] mx-auto w-full space-y-6" x-data="puLearningApp()" x-init="init()">
     
     <!-- Hero / Header -->
     <div class="relative bg-white rounded-2xl p-8 shadow-sm border border-slate-200 overflow-hidden mb-6">
@@ -444,51 +444,6 @@
 
 {% block scripts %}
 <script>
-    const LLM_STORAGE_KEYS = {
-        apiKey: 'finrisk_llm_api_key',
-        apiBase: 'finrisk_llm_api_base',
-        model: 'finrisk_llm_model',
-        serverBoot: 'finrisk_llm_server_boot_id',
-    };
-
-    function getServerBootId() {
-        const meta = document.querySelector('meta[name="finrisk-server-boot-id"]');
-        return meta ? (meta.getAttribute('content') || '') : '';
-    }
-
-    function clearLlmConfigStorage() {
-        Object.values(LLM_STORAGE_KEYS).forEach((k) => {
-            try {
-                localStorage.removeItem(k);
-                sessionStorage.removeItem(k);
-            } catch (e) { /* private mode */ }
-        });
-    }
-
-    function llmStorageRead(key) {
-        try {
-            return localStorage.getItem(key);
-        } catch (e) { /* private mode */ }
-        return null;
-    }
-
-    function llmStorageWrite(key, value) {
-        try {
-            if (value) localStorage.setItem(key, value);
-            else localStorage.removeItem(key);
-        } catch (e) { /* private mode */ }
-    }
-
-    function syncLlmConfigBootId() {
-        const current = getServerBootId();
-        if (!current) return true;
-        const stored = llmStorageRead(LLM_STORAGE_KEYS.serverBoot);
-        if (stored === current) return true;
-        clearLlmConfigStorage();
-        llmStorageWrite(LLM_STORAGE_KEYS.serverBoot, current);
-        return false;
-    }
-
     function puLearningApp() {
         return {
             loading: false,
@@ -575,40 +530,48 @@
                 try {
                     const res = await fetch('{{ url_for("data_tool.pu_last_result") }}');
                     const data = await res.json();
-                    if (!data.success || !data.has_result || !data.result) return;
-                    this.results = data.result;
-                    this.addLog('已从磁盘恢复上次 PU 训练结果', 'info');
+                    if (!data.success) return;
+                    if (data.best_params) {
+                        this.applyParamsFromDict(data.best_params);
+                    }
+                    if (data.has_result && data.result) {
+                        this.results = data.result;
+                        this.addLog('已从磁盘恢复最优 PU 训练结果', 'info');
+                    } else if (data.best_params) {
+                        this.addLog('已从磁盘恢复最优 PU 参数', 'info');
+                    }
                 } catch (e) {
                     console.warn('restorePuResultsFromDisk:', e);
                 }
             },
 
             loadLlmConfigFromStorage() {
-                if (!syncLlmConfigBootId()) {
+                const cfg = window.loadLlmConfigFromStorage();
+                if (!cfg) {
                     this.apiKey = '';
                     this.apiBase = 'https://api.deepseek.com/v1';
                     this.modelName = 'deepseek-chat';
                     return;
                 }
-                const key = llmStorageRead(LLM_STORAGE_KEYS.apiKey);
-                const base = llmStorageRead(LLM_STORAGE_KEYS.apiBase);
-                const model = llmStorageRead(LLM_STORAGE_KEYS.model);
-                if (key) this.apiKey = key;
-                if (base) this.apiBase = base;
-                if (model) this.modelName = model;
+                if (cfg.apiKey) this.apiKey = cfg.apiKey;
+                if (cfg.apiBase) this.apiBase = cfg.apiBase;
+                if (cfg.modelName) this.modelName = cfg.modelName;
             },
 
             persistLlmConfig() {
-                const boot = getServerBootId();
-                if (boot) llmStorageWrite(LLM_STORAGE_KEYS.serverBoot, boot);
-                llmStorageWrite(LLM_STORAGE_KEYS.apiKey, (this.apiKey || '').trim());
-                llmStorageWrite(LLM_STORAGE_KEYS.apiBase, (this.apiBase || '').trim());
-                llmStorageWrite(LLM_STORAGE_KEYS.model, (this.modelName || '').trim());
+                window.persistLlmConfig({
+                    apiKey: this.apiKey,
+                    apiBase: this.apiBase,
+                    modelName: this.modelName,
+                });
             },
 
             addLog(message, type = 'info') {
                 const time = new Date().toLocaleTimeString();
                 this.logs.push({ time, message, type });
+                if (window.emitClientLog) {
+                    window.emitClientLog('pu_learning', type, `${time} ${message}`);
+                }
                 this.$nextTick(() => {
                     const container = this.$refs.logContainer;
                     if (container) container.scrollTop = container.scrollHeight;
@@ -716,13 +679,12 @@
                     if (data.running) {
                         this.autoresearchRunning = true;
                         this.autoresearchActive = true;
-                    }
-
-                    if (data.current_params) {
-                        this.applyParamsFromDict(data.current_params);
-                    }
-                    if (data.last_run_result && data.last_run_result.success) {
-                        this.results = data.last_run_result;
+                        if (data.current_params) {
+                            this.applyParamsFromDict(data.current_params);
+                        }
+                        if (data.last_run_result && data.last_run_result.success) {
+                            this.results = data.last_run_result;
+                        }
                     }
 
                     if (!data.running && this.autoresearchStarted) {
@@ -731,6 +693,16 @@
                         this.autoresearchStarted = false;
                         this.autoresearchStopping = false;
                         this.stopAutoresearchPolling();
+                        if (data.best_params) {
+                            this.applyParamsFromDict(data.best_params);
+                        } else if (data.current_params) {
+                            this.applyParamsFromDict(data.current_params);
+                        }
+                        if (data.best_run_result && data.best_run_result.success) {
+                            this.results = data.best_run_result;
+                        } else if (data.last_run_result && data.last_run_result.success) {
+                            this.results = data.last_run_result;
+                        }
                         const reasonMap = {
                             user_stop: '用户停止',
                             max_invalid_iterations: '连续无效迭代达上限',
@@ -738,8 +710,12 @@
                         };
                         const msg = reasonMap[data.stop_reason] || data.stop_reason || '已结束';
                         this.addLog(`autoresearch 结束: ${msg}`, data.stop_reason === 'max_invalid_iterations' ? 'warning' : 'info');
+                        const bestF1 = data.best_f1;
+                        const bestHint = bestF1 != null
+                            ? `，已恢复最优 F1=${(bestF1 * 100).toFixed(2)}% 对应参数与结果`
+                            : '';
                         window.dispatchEvent(new CustomEvent('notify', {
-                            detail: { message: 'autoresearch ' + msg, type: 'info' }
+                            detail: { message: 'autoresearch ' + msg + bestHint, type: 'info' }
                         }));
                     }
                 } catch (e) {

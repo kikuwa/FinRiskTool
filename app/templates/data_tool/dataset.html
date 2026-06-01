@@ -43,6 +43,7 @@
             </div>
             
             <div class="border-2 border-dashed border-slate-200 rounded-xl p-8 text-center hover:border-primary/50 hover:bg-blue-50/30 transition-all cursor-pointer group relative"
+                 @click="$refs.fullInput.click()"
                  @dragover.prevent="$el.classList.add('border-primary', 'bg-blue-50/30')"
                  @dragleave.prevent="$el.classList.remove('border-primary', 'bg-blue-50/30')"
                  @drop.prevent="handleDrop($event, 'full')">
@@ -53,7 +54,7 @@
                     <span class="material-symbols-outlined text-[48px] text-slate-300 mb-4 block group-hover:text-primary/70 transition-colors">cloud_upload</span>
                     <p class="text-slate-600 font-medium mb-1">点击或拖拽上传</p>
                     <p class="text-slate-400 text-xs mb-4">支持 CSV 格式，最大 500MB</p>
-                    <button @click="$refs.fullInput.click()" class="px-4 py-2 bg-primary text-white text-sm font-bold rounded-lg hover:bg-blue-700 transition-colors shadow-sm shadow-blue-200">
+                    <button type="button" @click.stop="$refs.fullInput.click()" class="px-4 py-2 bg-primary text-white text-sm font-bold rounded-lg hover:bg-blue-700 transition-colors shadow-sm shadow-blue-200">
                         选择文件
                     </button>
                 </div>
@@ -110,6 +111,7 @@
             </div>
             
             <div class="border-2 border-dashed border-slate-200 rounded-xl p-8 text-center hover:border-green-500/50 hover:bg-green-50/30 transition-all cursor-pointer group relative"
+                 @click="$refs.trainInput.click()"
                  @dragover.prevent="$el.classList.add('border-green-500', 'bg-green-50/30')"
                  @dragleave.prevent="$el.classList.remove('border-green-500', 'bg-green-50/30')"
                  @drop.prevent="handleDrop($event, 'train')">
@@ -120,7 +122,7 @@
                     <span class="material-symbols-outlined text-[48px] text-slate-300 mb-4 block group-hover:text-green-500/70 transition-colors">cloud_upload</span>
                     <p class="text-slate-600 font-medium mb-1">点击或拖拽上传</p>
                     <p class="text-slate-400 text-xs mb-4">支持 CSV 格式</p>
-                    <button @click="$refs.trainInput.click()" class="px-4 py-2 bg-white border border-slate-200 text-slate-700 hover:border-green-500 hover:text-green-600 text-sm font-bold rounded-lg transition-all">
+                    <button type="button" @click.stop="$refs.trainInput.click()" class="px-4 py-2 bg-white border border-slate-200 text-slate-700 hover:border-green-500 hover:text-green-600 text-sm font-bold rounded-lg transition-all">
                         选择文件
                     </button>
                 </div>
@@ -159,6 +161,7 @@
             </div>
             
             <div class="border-2 border-dashed border-slate-200 rounded-xl p-8 text-center hover:border-purple-500/50 hover:bg-purple-50/30 transition-all cursor-pointer group relative"
+                 @click="$refs.testInput.click()"
                  @dragover.prevent="$el.classList.add('border-purple-500', 'bg-purple-50/30')"
                  @dragleave.prevent="$el.classList.remove('border-purple-500', 'bg-purple-50/30')"
                  @drop.prevent="handleDrop($event, 'test')">
@@ -169,7 +172,7 @@
                     <span class="material-symbols-outlined text-[48px] text-slate-300 mb-4 block group-hover:text-purple-500/70 transition-colors">cloud_upload</span>
                     <p class="text-slate-600 font-medium mb-1">点击或拖拽上传</p>
                     <p class="text-slate-400 text-xs mb-4">支持 CSV 格式</p>
-                    <button @click="$refs.testInput.click()" class="px-4 py-2 bg-white border border-slate-200 text-slate-700 hover:border-purple-500 hover:text-purple-600 text-sm font-bold rounded-lg transition-all">
+                    <button type="button" @click.stop="$refs.testInput.click()" class="px-4 py-2 bg-white border border-slate-200 text-slate-700 hover:border-purple-500 hover:text-purple-600 text-sm font-bold rounded-lg transition-all">
                         选择文件
                     </button>
                 </div>

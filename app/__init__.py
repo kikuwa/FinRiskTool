@@ -1,4 +1,5 @@
 from flask import Flask, jsonify
+import logging
 import os
 import traceback
 import uuid
@@ -7,7 +8,11 @@ from werkzeug.exceptions import HTTPException
 
 from app.utils.session_logging import setup_session_logging
 from app.utils.http_access_logging import configure_quiet_http_access_logs
-from app.utils.workspace_reset import clear_data_workspace, should_clear_on_app_start
+from app.utils.workspace_reset import (
+    clear_cot_workspace,
+    clear_data_workspace,
+    should_clear_on_app_start,
+)
 
 
 def create_app():
@@ -28,15 +33,22 @@ def create_app():
 
     if should_clear_on_app_start():
         cleared = clear_data_workspace(project_root)
+        cleared.extend(clear_cot_workspace(project_root))
         print(
-            f'[workspace] cleared data/results and data/uploads '
+            f'[workspace] cleared data/results, data/uploads and CoT artifacts '
             f'(boot={app.config["SERVER_BOOT_ID"]}, items={cleared})'
         )
 
     # Ensure directories exist
     os.makedirs(app.config['LOG_FOLDER'], exist_ok=True)
-    app.config['SESSION_LOG_FILE'] = setup_session_logging(app.config['LOG_FOLDER'])
-    configure_quiet_http_access_logs()
+    session_log_file = setup_session_logging(app.config['LOG_FOLDER'])
+    if not session_log_file:
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        session_log_file = os.path.join(app.config['LOG_FOLDER'], f'server_{timestamp}.log')
+    app.config['SESSION_LOG_FILE'] = session_log_file
+    _ensure_file_loggers(app, session_log_file)
+    # 开发排障时保留全部 HTTP 访问日志（含 2xx/3xx）。
+    configure_quiet_http_access_logs(max_silent_status=0)
     os.makedirs(app.config['DATA_FOLDER'], exist_ok=True)
     os.makedirs(app.config['RESULTS_FOLDER'], exist_ok=True)
         
@@ -109,3 +121,26 @@ def create_app():
         return jsonify(response), 500
     
     return app
+
+
+def _ensure_file_loggers(app: Flask, log_file_path: str) -> None:
+    """确保 app/werkzeug 日志至少会落盘到会话日志。"""
+    os.makedirs(os.path.dirname(log_file_path), exist_ok=True)
+    formatter = logging.Formatter('[%(asctime)s] %(levelname)s in %(module)s: %(message)s')
+
+    def _attach(logger: logging.Logger) -> None:
+        for handler in logger.handlers:
+            if isinstance(handler, logging.FileHandler):
+                try:
+                    if os.path.abspath(handler.baseFilename) == os.path.abspath(log_file_path):
+                        return
+                except Exception:
+                    continue
+        file_handler = logging.FileHandler(log_file_path, encoding='utf-8')
+        file_handler.setLevel(logging.INFO)
+        file_handler.setFormatter(formatter)
+        logger.addHandler(file_handler)
+        logger.setLevel(logging.INFO)
+
+    _attach(app.logger)
+    _attach(logging.getLogger('werkzeug'))

@@ -38,6 +38,7 @@ from app.services.data_core.pu.training_runner import (
 )
 from app.services.data_core.pu.autoresearch import (
     get_autoresearch_status,
+    load_pu_best_run,
     request_autoresearch_stop,
     start_autoresearch,
 )
@@ -319,6 +320,52 @@ def log_exception(e):
     except Exception as log_e:
         print(f"FATAL: Failed to write to log file: {log_e}", file=sys.stderr)
 
+
+def _append_session_log_line(level: str, line: str) -> None:
+    """直接追加到会话日志，避免仅依赖 stdout/logger handler。"""
+    log_file_path = current_app.config.get('SESSION_LOG_FILE')
+    if not log_file_path:
+        return
+    stamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    record = f'[{stamp}] [{level.upper()}] {line}\n'
+    try:
+        with open(log_file_path, 'a', encoding='utf-8') as f:
+            f.write(record)
+    except Exception as log_e:
+        print(f"FATAL: Failed to append client log: {log_e}", file=sys.stderr)
+
+
+@data_tool_bp.route('/client_log', methods=['POST'])
+def client_log():
+    """接收前端日志并同步到终端与会话日志。"""
+    try:
+        data = request.json or {}
+        page = str(data.get('page', 'web')).strip()[:64]
+        level = str(data.get('level', 'info')).strip().lower()[:16]
+        message = str(data.get('message', '')).strip()
+        if not message:
+            return jsonify({'success': False, 'error': 'message 不能为空'}), 400
+
+        # 防止日志被超长文本刷屏
+        if len(message) > 2000:
+            message = message[:2000] + '...<truncated>'
+
+        tag = f'[client:{page}]'
+        line = f'{tag} {message}'
+        print(line)
+        logger = current_app.logger
+        if level == 'error':
+            logger.error(line)
+        elif level == 'warning':
+            logger.warning(line)
+        else:
+            logger.info(line)
+        _append_session_log_line(level, line)
+        return jsonify({'success': True})
+    except Exception as e:
+        log_exception(e)
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
@@ -468,20 +515,26 @@ def workflow_context():
 
 @data_tool_bp.route('/pu_last_result', methods=['GET'])
 def pu_last_result():
-    """从磁盘恢复上次 PU 训练结果摘要。"""
+    """从磁盘恢复上次 PU 训练结果摘要及最优参数。"""
     try:
         project_root = current_app.config['PROJECT_ROOT']
         result = load_pu_results_from_disk(project_root)
-        if not result:
+        best_run = load_pu_best_run(project_root)
+        if not result and not best_run:
             return jsonify({
                 'success': True,
                 'has_result': False,
             })
-        return jsonify({
+        payload = {
             'success': True,
-            'has_result': True,
-            'result': result,
-        })
+            'has_result': bool(result),
+        }
+        if result:
+            payload['result'] = result
+        if best_run:
+            payload['best_f1'] = best_run.get('best_f1')
+            payload['best_params'] = best_run.get('best_params')
+        return jsonify(payload)
     except Exception as e:
         log_exception(e)
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -892,6 +945,7 @@ def run_model():
         }), 408
 
     except ValueError as e:
+        log_exception(e)
         return jsonify({'success': False, 'error': str(e)}), 400
 
     except Exception as e:
@@ -955,6 +1009,7 @@ def pu_autoresearch_start():
         ))
         return jsonify({**result, 'status': get_autoresearch_status()})
     except ValueError as e:
+        log_exception(e)
         return jsonify({'success': False, 'error': str(e)}), 400
     except Exception as e:
         log_exception(e)
@@ -1053,6 +1108,7 @@ def run_model_feature_selection():
         })
 
     except ValueError as e:
+        log_exception(e)
         return jsonify({'success': False, 'error': str(e)}), 400
     except Exception as e:
         log_exception(e)
@@ -1231,6 +1287,7 @@ def mlbase_autoresearch_start():
             return jsonify(result), 409
         return jsonify({**result, 'status': get_mlbase_autoresearch_status()})
     except ValueError as e:
+        log_exception(e)
         return jsonify({'success': False, 'error': str(e)}), 400
     except Exception as e:
         log_exception(e)
@@ -1371,6 +1428,7 @@ def run_mlbase_test_eval():
             return jsonify(result), 409
         return jsonify(result)
     except ValueError as e:
+        log_exception(e)
         return jsonify({'success': False, 'error': str(e)}), 400
     except Exception as e:
         log_exception(e)

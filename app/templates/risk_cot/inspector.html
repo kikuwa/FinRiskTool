@@ -495,11 +495,19 @@
                 this.eventSource = new EventSource('/api/inspector/status');
                 this.eventSource.onmessage = (event) => {
                     const data = JSON.parse(event.data);
+                    const prevStatus = this.status.status;
                     this.status = data;
-                    
-                    if (data.status === 'completed' && this.status.status !== 'completed') {
+
+                    if (data.status === 'completed' && prevStatus !== 'completed') {
                         window.dispatchEvent(new CustomEvent('notify', { detail: { message: '质检完成，正在刷新结果...' } }));
-                        this.fetchResults(1); // Auto refresh when done
+                        this.fetchResults(1);
+                    }
+                };
+                this.eventSource.onerror = () => {
+                    // SSE 在 completed/stopped/error 后服务端会断开，属正常结束
+                    if (this.eventSource) {
+                        this.eventSource.close();
+                        this.eventSource = null;
                     }
                 };
             },
@@ -531,8 +539,11 @@
                     
                     if (data.status === 'success') {
                         window.dispatchEvent(new CustomEvent('notify', { detail: { message: '质检任务已启动' } }));
-                        // Store the output file to fetch results later
-                        this.currentOutputFile = data.output_file;
+                        // 保存输出文件名（兼容绝对/相对路径）
+                        const out = data.output_file || '';
+                        this.currentOutputFile = out.split(/[/\\]/).pop() || out;
+                        this.results = [];
+                        this.pagination = { page: 1, per_page: 20, total: 0, total_pages: 0 };
                     } else {
                         throw new Error(data.message);
                     }

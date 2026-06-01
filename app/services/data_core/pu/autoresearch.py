@@ -1,9 +1,11 @@
 """PU Learning autoresearch 演进循环（后台线程）。"""
+import json
 import os
 import threading
 import time
 import traceback
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from flask import Flask
@@ -12,6 +14,8 @@ from app.services.data_core.pu.bagging import (
     PU_TRAIN_LOG_FILENAME,
     PUTrainStoppedError,
     PUTrainTimeoutError,
+    finalize_best_predictions,
+    parse_pu_train_params,
     promote_autoresearch_predictions,
     terminate_active_pu_training,
 )
@@ -26,10 +30,13 @@ MAX_SAME_PARAMS_LLM_RETRIES = int(
 )
 from app.services.data_core.pu.training_runner import execute_pu_model_training
 
+PU_BEST_RUN_FILENAME = 'pu_best_run.json'
+
 
 @dataclass
 class AutoResearchState:
     running: bool = False
+    ever_started: bool = False
     stop_requested: bool = False
     iteration: int = 0
     max_invalid_iterations: int = 3
@@ -39,8 +46,10 @@ class AutoResearchState:
     stop_reason: Optional[str] = None
     last_error: Optional[str] = None
     current_params: Dict[str, Any] = field(default_factory=dict)
+    best_params: Dict[str, Any] = field(default_factory=dict)
     logs: List[Dict[str, str]] = field(default_factory=list)
     last_run_result: Optional[Dict[str, Any]] = None
+    best_run_result: Optional[Dict[str, Any]] = None
 
 
 _lock = threading.RLock()
@@ -125,6 +134,105 @@ def read_latest_f1_from_pu_train(project_root: str) -> Optional[float]:
     return values[-1] if values else None
 
 
+def read_best_run_from_pu_train(project_root: str) -> Optional[Dict[str, Any]]:
+    """读取 pu_train.tsv 中 F1 最优行（并列取最后一行）的参数与 F1。"""
+    path = _pu_train_log_path(project_root)
+    if not os.path.exists(path):
+        return None
+
+    with open(path, 'r', encoding='utf-8') as f:
+        lines = [ln.strip() for ln in f if ln.strip()]
+    if len(lines) < 2:
+        return None
+
+    header = lines[0].split('|')
+    if 'F1' not in header or '参数' not in header:
+        return None
+    f1_idx = header.index('F1')
+    params_idx = header.index('参数')
+
+    best_f1: Optional[float] = None
+    best_params: Dict[str, Any] = {}
+    for row_line in lines[1:]:
+        row = row_line.split('|')
+        if len(row) <= max(f1_idx, params_idx):
+            continue
+        raw_f1 = row[f1_idx].strip()
+        if raw_f1.upper() == 'NAN' or raw_f1.lower() == 'timeout':
+            continue
+        try:
+            f1_val = float(raw_f1)
+        except ValueError:
+            continue
+        if best_f1 is None or f1_val >= best_f1:
+            best_f1 = f1_val
+            best_params = parse_pu_train_params(row[params_idx])
+
+    if best_f1 is None:
+        return None
+    return {'f1': best_f1, 'params': best_params}
+
+
+def _pu_best_run_path(project_root: str) -> str:
+    return os.path.join(
+        project_root, 'data', 'results', 'pu_learning', PU_BEST_RUN_FILENAME
+    )
+
+
+def save_pu_best_run(project_root: str) -> None:
+    """持久化最优 F1 与参数，供页面刷新后恢复。"""
+    with _lock:
+        payload = {
+            'best_f1': _state.best_f1,
+            'best_params': dict(_state.best_params),
+            'updated_at': datetime.now().isoformat(timespec='seconds'),
+        }
+    if not payload['best_params'] and payload['best_f1'] is None:
+        return
+    path = _pu_best_run_path(project_root)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, 'w', encoding='utf-8') as f:
+        json.dump(payload, f, indent=4, ensure_ascii=False)
+
+
+def load_pu_best_run(project_root: str) -> Optional[Dict[str, Any]]:
+    """读取已保存的最优 run；若无 JSON 则回退解析 pu_train.tsv。"""
+    path = _pu_best_run_path(project_root)
+    if os.path.isfile(path):
+        with open(path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        if data.get('best_params'):
+            return data
+    historical = read_best_run_from_pu_train(project_root)
+    if not historical:
+        return None
+    return {
+        'best_f1': historical.get('f1'),
+        'best_params': historical.get('params', {}),
+    }
+
+
+def _finalize_autoresearch(project_root: str, output_dir: str) -> None:
+    """autoresearch 结束时锁定最优 predictions 与参数。"""
+    finalize_best_predictions(output_dir)
+    historical = read_best_run_from_pu_train(project_root)
+    with _lock:
+        if not _state.best_params and historical:
+            _state.best_params = dict(historical.get('params') or {})
+        if _state.best_params:
+            _state.current_params = dict(_state.best_params)
+        if historical and _state.best_f1 is None:
+            _state.best_f1 = historical.get('f1')
+    save_pu_best_run(project_root)
+    with _lock:
+        best_f1 = _state.best_f1
+    if best_f1 is not None:
+        _append_log(
+            f'autoresearch 结束，已锁定最优 F1={best_f1:.6g} 对应参数与 predictions',
+            'success',
+        )
+
+
 def _update_f1_streak(project_root: str) -> None:
     f1 = read_latest_f1_from_pu_train(project_root)
     with _lock:
@@ -148,6 +256,7 @@ def get_autoresearch_status() -> Dict[str, Any]:
     with _lock:
         return {
             'running': _state.running,
+            'finished': _state.ever_started and not _state.running,
             'stopping': _state.running and _state.stop_requested,
             'stop_requested': _state.stop_requested,
             'iteration': _state.iteration,
@@ -158,8 +267,10 @@ def get_autoresearch_status() -> Dict[str, Any]:
             'stop_reason': _state.stop_reason,
             'last_error': _state.last_error,
             'current_params': dict(_state.current_params),
+            'best_params': dict(_state.best_params),
             'logs': list(_state.logs),
             'last_run_result': _state.last_run_result,
+            'best_run_result': _state.best_run_result,
         }
 
 
@@ -206,11 +317,13 @@ def start_autoresearch(
 
     project_root = app.config['PROJECT_ROOT']
     historical_best_f1 = read_best_f1_from_pu_train(project_root)
+    historical_best = read_best_run_from_pu_train(project_root)
 
     with _lock:
         if _state.running:
             return {'success': False, 'error': 'autoresearch 已在运行中'}
         _state.running = True
+        _state.ever_started = True
         _state.stop_requested = False
         _state.iteration = 0
         _state.max_invalid_iterations = max(1, int(max_invalid_iterations))
@@ -221,7 +334,11 @@ def start_autoresearch(
         _state.last_error = None
         _state.logs = []
         _state.last_run_result = None
+        _state.best_run_result = None
         _state.current_params = dict(initial_params or DEFAULT_PU_PARAMS)
+        _state.best_params = dict(
+            (historical_best or {}).get('params') or {}
+        )
 
     _append_log(
         f'autoresearch 启动，最大无效迭代次数={_state.max_invalid_iterations}',
@@ -268,6 +385,10 @@ def start_autoresearch(
                     _state.running = False
                     if _state.stop_requested and not _state.stop_reason:
                         _state.stop_reason = 'user_stop'
+                try:
+                    _finalize_autoresearch(project_root, output_dir)
+                except Exception as exc:
+                    _append_log(f'锁定最优结果失败: {exc}', 'warning')
                 _append_log(
                     f'autoresearch 已结束（{_state.stop_reason or "unknown"}）',
                     'success' if _state.stop_reason == 'converged' else 'info',
@@ -508,6 +629,10 @@ def _autoresearch_loop(
         )
         if improved:
             promote_autoresearch_predictions(output_dir)
+            with _lock:
+                _state.best_params = dict(params)
+                if run_result:
+                    _state.best_run_result = run_result
             _append_log(
                 f'本轮 F1={run_f1:.4f} 刷新最优，已更新 train/test_predictions.csv',
                 'success',

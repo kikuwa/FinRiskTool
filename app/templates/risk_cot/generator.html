@@ -26,8 +26,8 @@
                 </div>
                 <h1 class="text-3xl font-bold text-slate-900 mb-4">数据生成与 Prompt 工程</h1>
                 <p class="text-slate-500 max-w-2xl leading-relaxed text-sm">
-                    一站式大模型微调数据准备工具。支持模拟数据生成与本地文件导入，提供 AI 辅助的 Prompt 模板优化功能，
-                    可将结构化风控数据批量转换为高质量的 Alpaca 指令微调格式 (JSONL)。
+                    将训练 CSV 与已确认 Top 特征批量转换为 Alpaca 指令微调格式 (JSONL)。
+                    instruction 使用下方可编辑 Prompt 模板；input 按每行特征值自动填充【企业指标数据报告】。
                 </p>
             </div>
         </div>
@@ -344,14 +344,31 @@
                 }
 
                 const featureSection = `【特征字段列表（已确认 ${this.topFeatures.length} 个）】\n${featureList}`;
-                
-                if (this.template.includes('【企业指标数据报告】')) {
-                    this.template = this.template.replace('【企业指标数据报告】', `${featureSection}\n\n【企业指标数据报告】`);
+
+                this.template = this.template.replace(
+                    /【特征字段列表（已确认 \d+ 个）】[\s\S]*?(?=\n【|$)/,
+                    ''
+                ).replace(
+                    /【特征字段列表】[\s\S]*?(?=\n【|$)/,
+                    ''
+                ).trim();
+
+                const reportAnchor = '【特征字段列表】\n（导入已确认特征后自动填充）';
+                if (this.template.includes(reportAnchor)) {
+                    this.template = this.template.replace(
+                        reportAnchor,
+                        `${featureSection}`
+                    );
+                } else if (this.template.includes('【特征字段列表】')) {
+                    this.template = this.template.replace(
+                        '【特征字段列表】',
+                        featureSection
+                    );
                 } else {
                     this.template += `\n\n${featureSection}`;
                 }
-                
-                window.dispatchEvent(new CustomEvent('notify', { detail: { message: '特征列表已写入模板', type: 'info' } }));
+
+                window.dispatchEvent(new CustomEvent('notify', { detail: { message: '特征列表已写入模板（位于企业指标数据报告之后）', type: 'info' } }));
             },
             
             resetTemplate() {
@@ -366,14 +383,23 @@
                         headers: {'Content-Type': 'application/json'},
                         body: JSON.stringify({ 
                             source_file: this.currentFile,
-                            template: this.template
+                            template: this.template,
+                            features: this.topFeatures,
                         })
                     });
                     const data = await res.json();
                     if (data.status === 'success') {
-                        this.alpacaResult = `转换成功！\n输出文件: ${data.output_file}\n共转换 ${data.message}`;
+                        const engineMode = data.engine_mode || 'unknown';
+                        const schemaVersion = data.schema_version || 'unknown';
+                        const featureCount = data.feature_count ?? 0;
+                        this.alpacaResult =
+                            `转换成功！\n输出文件: ${data.output_file}\n共转换 ${data.message}` +
+                            `\n引擎: ${engineMode}\nSchema: ${schemaVersion}\n特征数: ${featureCount}\n` +
+                            `\n提示：若你看到旧结构，请删除历史 .jsonl 后重新生成。`;
                         this.activeTab = 'alpaca';
-                        window.dispatchEvent(new CustomEvent('notify', { detail: { message: '转换成功' } }));
+                        window.dispatchEvent(new CustomEvent('notify', {
+                            detail: { message: `转换成功（${engineMode}/${schemaVersion}）`, type: 'success' }
+                        }));
                         
                         // Set this as input for inference automatically?
                         localStorage.setItem('last_alpaca_file', data.output_file);

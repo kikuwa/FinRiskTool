@@ -33,6 +33,8 @@ PU_TRAIN_PARAM_KEYS = [
 PU_RUN_TIMEOUT_SECONDS = 600  # 10 分钟
 AUTORESEARCH_TMP_TRAIN_PREDICTIONS = '_autoresearch_tmp_train_predictions.csv'
 AUTORESEARCH_TMP_TEST_PREDICTIONS = '_autoresearch_tmp_test_predictions.csv'
+AUTORESEARCH_BEST_TRAIN_PREDICTIONS = 'best_train_predictions.csv'
+AUTORESEARCH_BEST_TEST_PREDICTIONS = 'best_test_predictions.csv'
 
 _active_pu_proc: Optional[mp.Process] = None
 _active_pu_stop_event: Any = None
@@ -176,6 +178,34 @@ def promote_autoresearch_predictions(output_dir: str) -> None:
         if os.path.exists(src):
             shutil.copy2(src, dst)
             print(f'已更新最优预测: {dst}')
+    snapshot_best_predictions(output_dir)
+
+
+def snapshot_best_predictions(output_dir: str) -> None:
+    """将当前正式 predictions 复制为最优快照（F1 提升时调用）。"""
+    pairs = [
+        ('train_predictions.csv', AUTORESEARCH_BEST_TRAIN_PREDICTIONS),
+        ('test_predictions.csv', AUTORESEARCH_BEST_TEST_PREDICTIONS),
+    ]
+    for src_name, dst_name in pairs:
+        src = os.path.join(output_dir, src_name)
+        dst = os.path.join(output_dir, dst_name)
+        if os.path.exists(src):
+            shutil.copy2(src, dst)
+
+
+def finalize_best_predictions(output_dir: str) -> None:
+    """autoresearch 结束时，从最优快照恢复正式 predictions（若快照存在）。"""
+    pairs = [
+        (AUTORESEARCH_BEST_TRAIN_PREDICTIONS, 'train_predictions.csv'),
+        (AUTORESEARCH_BEST_TEST_PREDICTIONS, 'test_predictions.csv'),
+    ]
+    for src_name, dst_name in pairs:
+        src = os.path.join(output_dir, src_name)
+        dst = os.path.join(output_dir, dst_name)
+        if os.path.exists(src):
+            shutil.copy2(src, dst)
+            print(f'已恢复最优预测: {dst}')
 
 
 def extract_pu_train_params(kwargs: dict) -> Dict:
@@ -189,6 +219,30 @@ def format_pu_train_params(params: dict) -> str:
         return 'NAN'
     parts = [f'{key}={params[key]}' for key in PU_TRAIN_PARAM_KEYS if key in params]
     return ';'.join(parts) if parts else 'NAN'
+
+
+def parse_pu_train_params(params_str: str) -> Dict[str, Any]:
+    """解析 pu_train.tsv 参数列（与 format_pu_train_params 对称）。"""
+    if not params_str or str(params_str).strip().upper() == 'NAN':
+        return {}
+    result: Dict[str, Any] = {}
+    for part in str(params_str).split(';'):
+        part = part.strip()
+        if not part or '=' not in part:
+            continue
+        key, _, raw_val = part.partition('=')
+        key = key.strip()
+        raw_val = raw_val.strip()
+        if key not in PU_TRAIN_PARAM_KEYS:
+            continue
+        try:
+            if '.' in raw_val or 'e' in raw_val.lower():
+                result[key] = float(raw_val)
+            else:
+                result[key] = int(raw_val)
+        except ValueError:
+            result[key] = raw_val
+    return result
 
 
 def _format_log_value(value: Union[float, str, None]) -> str:
@@ -354,6 +408,106 @@ def compute_positive_metrics_at_threshold(
     }
 
 
+def _dtype_snapshot(df: pd.DataFrame, label_col: str, top_n: int = 20) -> Dict[str, str]:
+    """返回前 top_n 个特征列的 dtype 快照，便于日志定位。"""
+    cols = [c for c in df.columns if c != label_col][:top_n]
+    return {c: str(df[c].dtype) for c in cols}
+
+
+def _coerce_non_numeric_features(
+    train_df: pd.DataFrame,
+    test_df: pd.DataFrame,
+    label_col: str,
+) -> list[str]:
+    """
+    对非数值特征做兜底转换：
+    1) 尝试 to_numeric；
+    2) 若无法数值化，则做统一类别编码（train/test 联合映射）。
+    返回转换日志列表。
+    """
+    changed_logs: list[str] = []
+    feature_cols = [c for c in train_df.columns if c != label_col]
+    for col in feature_cols:
+        train_is_num = pd.api.types.is_numeric_dtype(train_df[col])
+        test_is_num = pd.api.types.is_numeric_dtype(test_df[col])
+        if train_is_num and test_is_num:
+            continue
+
+        raw_train = train_df[col]
+        raw_test = test_df[col]
+        before_train = str(raw_train.dtype)
+        before_test = str(raw_test.dtype)
+
+        train_num = pd.to_numeric(raw_train, errors='coerce')
+        test_num = pd.to_numeric(raw_test, errors='coerce')
+        if train_num.notna().any() or test_num.notna().any():
+            fill_val = train_num.dropna().median()
+            if pd.isna(fill_val):
+                fill_val = 0.0
+            train_df[col] = train_num.fillna(fill_val).astype(float)
+            test_df[col] = test_num.fillna(fill_val).astype(float)
+            changed_logs.append(
+                f'{col}: {before_train}/{before_test} -> float64 (to_numeric, fill={fill_val})'
+            )
+            continue
+
+        # 无法数值化：统一类别编码（train/test 共同词表）
+        train_str = raw_train.fillna('Missing').astype(str)
+        test_str = raw_test.fillna('Missing').astype(str)
+        combined = pd.concat([train_str, test_str], ignore_index=True)
+        categories = pd.Index(pd.unique(combined))
+        train_df[col] = pd.Categorical(train_str, categories=categories).codes.astype(float)
+        test_df[col] = pd.Categorical(test_str, categories=categories).codes.astype(float)
+        changed_logs.append(
+            f'{col}: {before_train}/{before_test} -> float64 (category_code, cats={len(categories)})'
+        )
+    return changed_logs
+
+
+def _ensure_numeric_pu_frames(
+    train_df: pd.DataFrame,
+    test_df: pd.DataFrame,
+    label_col: str,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """训练前确保特征列全为数值 dtype，并打印前后快照。"""
+    print(f'PU dtype snapshot(before train): {_dtype_snapshot(train_df, label_col)}')
+    print(f'PU dtype snapshot(before test): {_dtype_snapshot(test_df, label_col)}')
+
+    train_df = train_df.copy()
+    test_df = test_df.copy()
+
+    # 标签列兜底为数值
+    for name, df in (('train', train_df), ('test', test_df)):
+        if not pd.api.types.is_numeric_dtype(df[label_col]):
+            coerced = pd.to_numeric(df[label_col], errors='coerce')
+            if coerced.isna().any():
+                bad = int(coerced.isna().sum())
+                raise ValueError(
+                    f'{name} 数据标签列 `{label_col}` 无法转为数值，存在 {bad} 个无效值'
+                )
+            df[label_col] = coerced.astype(int)
+
+    changed_logs = _coerce_non_numeric_features(train_df, test_df, label_col)
+    for item in changed_logs:
+        print(f'PU dtype normalized: {item}')
+
+    non_numeric = [
+        c for c in train_df.columns
+        if c != label_col and not pd.api.types.is_numeric_dtype(train_df[c])
+    ]
+    if non_numeric:
+        snapshot = {c: str(train_df[c].dtype) for c in non_numeric[:20]}
+        raise ValueError(
+            '特征列仍包含非数值类型: '
+            + ', '.join(non_numeric[:20])
+            + f' | dtype={snapshot}'
+        )
+
+    print(f'PU dtype snapshot(after train): {_dtype_snapshot(train_df, label_col)}')
+    print(f'PU dtype snapshot(after test): {_dtype_snapshot(test_df, label_col)}')
+    return train_df, test_df
+
+
 class BaggingPULeaning:
     """
     Bagging PU Learning：仅在 fit 阶段使用训练集（P + U），测试集仅用于 predict 与离线评估。
@@ -458,6 +612,7 @@ def run_pu_learning_pipeline(
     训练数据与测试数据严格分离：fit 只用 train_df，评估与预测只用 test_df。
     """
     os.makedirs(output_dir, exist_ok=True)
+    train_df, test_df = _ensure_numeric_pu_frames(train_df, test_df, label_col)
 
     X_p = train_df[train_df[label_col] == 1].drop(columns=[label_col])
     y_p = train_df[train_df[label_col] == 1][label_col]

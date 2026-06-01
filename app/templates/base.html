@@ -47,6 +47,78 @@
             },
         }
     </script>
+    <script>
+        (function () {
+            let lastSentAt = 0;
+            let lastFingerprint = '';
+            const MIN_INTERVAL_MS = 500;
+            const MAX_MSG_LEN = 1200;
+
+            window.emitClientLog = async function emitClientLog(page, level, message) {
+                try {
+                    const msg = String(message || '').trim();
+                    if (!msg) return;
+                    const clipped = msg.length > MAX_MSG_LEN ? (msg.slice(0, MAX_MSG_LEN) + '...<truncated>') : msg;
+                    const now = Date.now();
+                    const fingerprint = `${page}|${level}|${clipped}`;
+                    if (fingerprint === lastFingerprint && now - lastSentAt < MIN_INTERVAL_MS) {
+                        return;
+                    }
+                    lastFingerprint = fingerprint;
+                    lastSentAt = now;
+
+                    const body = {
+                        page: page || 'web',
+                        level: level || 'info',
+                        message: clipped,
+                    };
+                    await fetch('/data_tool/client_log', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(body),
+                    });
+                } catch (e) {
+                    // 日志上报失败不应影响主流程
+                }
+            };
+
+            function stringifyArgs(args) {
+                return args.map((arg) => {
+                    if (typeof arg === 'string') return arg;
+                    try {
+                        return JSON.stringify(arg);
+                    } catch (e) {
+                        return String(arg);
+                    }
+                }).join(' ');
+            }
+
+            function installConsoleForwarder() {
+                if (window.__clientConsoleForwardInstalled) return;
+                window.__clientConsoleForwardInstalled = true;
+                const methods = ['log', 'info', 'warn', 'error'];
+                methods.forEach((method) => {
+                    const original = console[method] ? console[method].bind(console) : null;
+                    console[method] = function (...args) {
+                        const level = method === 'log' ? 'info' : method;
+                        window.emitClientLog('browser_console', level, stringifyArgs(args));
+                        if (original) original(...args);
+                    };
+                });
+
+                window.addEventListener('error', (event) => {
+                    const msg = `${event.message || 'window error'} @ ${event.filename || 'unknown'}:${event.lineno || 0}`;
+                    window.emitClientLog('browser_console', 'error', msg);
+                });
+                window.addEventListener('unhandledrejection', (event) => {
+                    const reason = event && event.reason ? String(event.reason) : 'unknown promise rejection';
+                    window.emitClientLog('browser_console', 'error', `unhandledrejection: ${reason}`);
+                });
+            }
+
+            installConsoleForwarder();
+        })();
+    </script>
 <style type="text/tailwindcss">
         body {
             font-family: 'Noto Sans SC', 'Manrope', sans-serif;
@@ -110,6 +182,7 @@
         /* Alpine 未就绪前隐藏 x-show 元素，避免上传区转圈层默认露出 */
         [x-cloak] { display: none !important; }
     </style>
+    <script src="{{ url_for('static', filename='js/llm_config.js') }}"></script>
     <script src="{{ url_for('static', filename='js/alpine.min.js') }}" defer></script>
 </head>
 <body class="h-screen overflow-hidden" x-data="{ notifications: [] }" @notify.window="notifications.push($event.detail); setTimeout(() => notifications.shift(), 3000)">

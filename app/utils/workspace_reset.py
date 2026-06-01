@@ -1,7 +1,8 @@
-"""服务启动时清空上一轮 data/results 与 data/uploads。"""
+"""服务启动时清空上一轮 data/results、data/uploads 与 CoT 历史文件。"""
 import os
 import stat
 import time
+from fnmatch import fnmatch
 from typing import List, Tuple
 
 
@@ -107,6 +108,56 @@ def clear_data_workspace(project_root: str) -> List[str]:
         print(
             f'[workspace] {total_failed} 个文件因被占用未能删除；'
             f'请关闭 Excel/其他程序占用 data/results 后重启'
+        )
+
+    return cleared
+
+
+def _clear_matching_files(dir_path: str, patterns: List[str]) -> Tuple[int, int]:
+    """删除目录下匹配模式的文件（不递归）。返回 (deleted_files, failed_files)。"""
+    if not os.path.isdir(dir_path):
+        return 0, 0
+    deleted = 0
+    failed = 0
+    for name in os.listdir(dir_path):
+        if not any(fnmatch(name.lower(), p.lower()) for p in patterns):
+            continue
+        fp = os.path.join(dir_path, name)
+        if not os.path.isfile(fp):
+            continue
+        if _safe_unlink(fp):
+            deleted += 1
+        else:
+            failed += 1
+    return deleted, failed
+
+
+def clear_cot_workspace(project_root: str) -> List[str]:
+    """
+    清理 CoT 历史产物：
+    - data/*.jsonl（如 alpaca 转换结果、推理输入）
+    - results/*.jsonl（如 inference/inspector 输出）
+    返回已清理的路径说明。
+    """
+    cleared: List[str] = []
+    total_failed = 0
+    data_dir = os.path.join(project_root, 'data')
+    results_dir = os.path.join(project_root, 'results')
+
+    deleted_data, failed_data = _clear_matching_files(data_dir, ['*.jsonl'])
+    deleted_results, failed_results = _clear_matching_files(results_dir, ['*.jsonl'])
+
+    total_failed += failed_data + failed_results
+    if deleted_data > 0:
+        cleared.append(f'data/*.jsonl:{deleted_data}')
+    if deleted_results > 0:
+        cleared.append(f'results/*.jsonl:{deleted_results}')
+
+    if total_failed:
+        cleared.append(f'warnings:{total_failed}_files_locked')
+        print(
+            f'[workspace] {total_failed} 个 CoT 文件因被占用未能删除；'
+            '请关闭占用程序后重启'
         )
 
     return cleared
