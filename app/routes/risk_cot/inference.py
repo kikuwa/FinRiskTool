@@ -50,10 +50,10 @@ def run_inference():
         current_app.logger.info(f"Received inference request with data: {data}")
         
         input_file = data.get('input_file')
-        api_key = data.get('api_key')
-        
-        if not input_file or not api_key:
-            return jsonify({'status': 'error', 'message': 'Missing required parameters'}), 400
+        api_key = data.get('api_key') or ''
+
+        if not input_file:
+            return jsonify({'status': 'error', 'message': 'Missing input_file'}), 400
             
         # Handle relative paths
         if not os.path.isabs(input_file):
