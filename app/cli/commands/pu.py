@@ -65,9 +65,7 @@ def cmd_train(args) -> None:
 
 
 def cmd_autoresearch_start(args) -> None:
-    api_key = args.api_key or os.environ.get('OPENAI_API_KEY')
-    if not api_key:
-        fail('请提供 --api-key 或设置 OPENAI_API_KEY')
+    api_key = args.api_key or os.environ.get('OPENAI_API_KEY') or ''
 
     ctx = CliContext(args.project_root, args.label_col, args.json)
     label_col = ctx.resolved_label_col()
