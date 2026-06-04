@@ -119,9 +119,7 @@ def cmd_test(args) -> None:
 
 
 def cmd_autoresearch_start(args) -> None:
-    api_key = args.api_key or os.environ.get('OPENAI_API_KEY')
-    if not api_key:
-        fail('请提供 --api-key 或设置 OPENAI_API_KEY')
+    api_key = args.api_key or os.environ.get('OPENAI_API_KEY') or ''
     if args.variant == 'top_features':
         _require_top_features(args.project_root)
 
