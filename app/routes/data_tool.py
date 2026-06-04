@@ -961,9 +961,7 @@ def pu_autoresearch_start():
     """启动 autoresearch 演进循环。"""
     try:
         data = request.json or {}
-        api_key = data.get('api_key')
-        if not api_key:
-            return jsonify({'success': False, 'error': '请提供 API Key'}), 400
+        api_key = data.get('api_key') or ''
 
         max_invalid = data.get('max_invalid_iterations', 3)
         try:
@@ -1234,9 +1232,7 @@ def mlbase_autoresearch_start():
     """启动 MLBase autoresearch 演进循环。"""
     try:
         data = request.json or {}
-        api_key = data.get('api_key')
-        if not api_key:
-            return jsonify({'success': False, 'error': '请提供 API Key'}), 400
+        api_key = data.get('api_key') or ''
 
         max_invalid = data.get('max_invalid_iterations', 3)
         try:
@@ -1632,12 +1628,9 @@ def optimize_pu_params():
     """调用大模型 API，结合数据集分析报告与 PU_bagging 算法推荐参数"""
     try:
         data = request.json or {}
-        api_key = data.get('api_key')
+        api_key = data.get('api_key') or ''
         base_url = data.get('base_url') or os.environ.get('OPENAI_BASE_URL')
         model = data.get('model') or os.environ.get('PU_PARAM_LLM_MODEL', 'gpt-4o-mini')
-
-        if not api_key:
-            return jsonify({'success': False, 'error': '请提供 API Key'})
 
         project_root = current_app.config['PROJECT_ROOT']
         log_folder = current_app.config.get('LOG_FOLDER', os.path.join(project_root, 'logs'))
@@ -1676,9 +1669,7 @@ def optimize_fe_params():
     """LLM 推荐特征选择流水线参数。"""
     try:
         data = request.json or {}
-        api_key = data.get('api_key')
-        if not api_key:
-            return jsonify({'success': False, 'error': '请提供 API Key'}), 400
+        api_key = data.get('api_key') or ''
         base_url = data.get('base_url') or os.environ.get('OPENAI_BASE_URL')
         model = data.get('model') or os.environ.get('PU_PARAM_LLM_MODEL', 'gpt-4o-mini')
         project_root = current_app.config['PROJECT_ROOT']
@@ -1701,9 +1692,7 @@ def optimize_mlbase_params():
     """LLM 推荐 MLBase 单次训练参数。"""
     try:
         data = request.json or {}
-        api_key = data.get('api_key')
-        if not api_key:
-            return jsonify({'success': False, 'error': '请提供 API Key'}), 400
+        api_key = data.get('api_key') or ''
         base_url = data.get('base_url') or os.environ.get('OPENAI_BASE_URL')
         model = data.get('model') or os.environ.get('PU_PARAM_LLM_MODEL', 'gpt-4o-mini')
         project_root = current_app.config['PROJECT_ROOT']
