@@ -137,14 +137,11 @@ def get_default_template():
 @generator_bp.route('/template/generate', methods=['POST'])
 def generate_template():
     try:
-        api_key = request.json.get('api_key')
+        api_key = request.json.get('api_key') or ''
         base_url = request.json.get('base_url')
         model = request.json.get('model', 'gpt-3.5-turbo')
         features = request.json.get('features', [])
-        
-        if not api_key:
-             return jsonify({'status': 'error', 'message': 'API Key is required'}), 400
-             
+
         engine = PromptEngine()
         template = engine.generate_template_from_llm(
             features=features,
