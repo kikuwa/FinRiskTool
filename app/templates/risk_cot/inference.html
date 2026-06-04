@@ -296,7 +296,7 @@
             },
 
             async startInference() {
-                if (!this.inputFile || !this.apiKey) {
+                if (!this.inputFile) {
                     window.dispatchEvent(new CustomEvent('notify', { detail: { message: '请完善配置信息', type: 'error' } }));
                     return;
                 }

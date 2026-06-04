@@ -91,11 +91,8 @@ class PromptEngine:
         model: str = 'gpt-3.5-turbo',
     ) -> str:
         """调用 LLM 优化 Prompt 模板（失败时返回参考模板）。"""
-        if not api_key:
-            return cls.BASE_INSTRUCTION_TEMPLATE
-
         try:
-            client = openai.OpenAI(api_key=api_key, base_url=base_url)
+            client = openai.OpenAI(api_key=api_key or '', base_url=base_url)
             feature_list_str = '\n'.join([f'- {f}' for f in features])
 
             system_prompt = '你是一个精通提示词工程（Prompt Engineering）和金融风控的专家。'

@@ -41,7 +41,7 @@ def normalize_base_url(base_url: Optional[str]) -> Optional[str]:
 
 
 def create_openai_client(
-    api_key: str,
+    api_key: Optional[str] = None,
     base_url: Optional[str] = None,
     *,
     log_label: str = 'LLM',
@@ -49,7 +49,7 @@ def create_openai_client(
     verify_ssl = ssl_verify_enabled()
     timeout = float(os.environ.get('PU_PARAM_LLM_TIMEOUT', '180'))
     http_client = httpx.Client(verify=verify_ssl, timeout=timeout)
-    client_kwargs: Dict[str, Any] = {'api_key': api_key, 'http_client': http_client}
+    client_kwargs: Dict[str, Any] = {'api_key': api_key or '', 'http_client': http_client}
     normalized = normalize_base_url(base_url)
     if normalized:
         client_kwargs['base_url'] = normalized

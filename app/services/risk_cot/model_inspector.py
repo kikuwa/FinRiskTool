@@ -114,12 +114,12 @@ Output: {output}
 
     def score_single(self, instruction, input_text, output, api_key=None, api_base=None, model_name=None, system_prompt=None):
         """对单条样本评分"""
-        target_api_key = api_key or self.default_api_key
+        if api_key is not None:
+            target_api_key = api_key
+        else:
+            target_api_key = self.default_api_key or ''
         target_api_base = api_base or self.default_api_base
         target_model = model_name or self.default_model
-        
-        if not target_api_key:
-            return 0.0, "Missing API Key"
 
         if not (instruction or output): # allow empty input
              return 0.0, "Empty content"

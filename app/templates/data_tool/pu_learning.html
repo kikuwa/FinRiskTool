@@ -724,10 +724,6 @@
             },
 
             async startAutoresearch() {
-                if (!this.apiKey) {
-                    window.dispatchEvent(new CustomEvent('notify', { detail: { message: '请输入 API Key', type: 'warning' } }));
-                    return;
-                }
                 this.persistLlmConfig();
                 const ratePct = parseFloat(this.estimatedPositiveRatePct);
                 const timeoutMin = parseInt(this.timeoutMinutes) || 10;
@@ -897,11 +893,6 @@
             },
 
             async optimizeParams() {
-                if (!this.apiKey) {
-                    window.dispatchEvent(new CustomEvent('notify', { detail: { message: '请输入 API Key', type: 'warning' } }));
-                    return;
-                }
-                
                 this.optimizing = true;
                 this.persistLlmConfig();
                 this.addLog('正在调用大模型优化 PU 参数...', 'info');

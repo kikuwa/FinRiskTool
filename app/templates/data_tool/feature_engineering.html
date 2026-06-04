@@ -1491,10 +1491,6 @@
             },
 
             async startMlAutoresearch() {
-                if (!this.apiKey) {
-                    window.dispatchEvent(new CustomEvent('notify', { detail: { message: '请输入 API Key', type: 'warning' } }));
-                    return;
-                }
                 if (!this.featuresConfirmed) {
                     window.dispatchEvent(new CustomEvent('notify', { detail: { message: '请先确认特征', type: 'warning' } }));
                     return;
@@ -1682,11 +1678,6 @@
 
             async optimizeFeParams() {
                 console.log('optimizeFeParams');
-                if (!this.apiKey) {
-                    this.addLog('请先配置 API Key', 'warning');
-                    window.dispatchEvent(new CustomEvent('notify', { detail: { message: '请输入 API Key', type: 'warning' } }));
-                    return;
-                }
                 this.persistLlmConfig();
                 this.feOptimizing = true;
                 this.feReasoning = '';
@@ -1718,11 +1709,6 @@
 
             async optimizeMlParams() {
                 console.log('optimizeMlParams');
-                if (!this.apiKey) {
-                    this.addLog('请先配置 API Key', 'warning');
-                    window.dispatchEvent(new CustomEvent('notify', { detail: { message: '请输入 API Key', type: 'warning' } }));
-                    return;
-                }
                 if (!this.featuresConfirmed) {
                     this.addLog('请先确认特征后再使用 MLBase 参数推荐', 'warning');
                     window.dispatchEvent(new CustomEvent('notify', { detail: { message: '请先确认特征', type: 'warning' } }));

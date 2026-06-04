@@ -12,6 +12,7 @@ python cli.py <子命令> [选项]
 
 | 文档 | 内容 |
 |------|------|
+| [LOCAL_LLM.md](LOCAL_LLM.md) | **本地 / 内网 OpenAI 兼容模型**配置与需修改的文件清单 |
 | [cli/examples.md](cli/examples.md) | 跨平台环境准备、端到端流水线（Bash / PowerShell / CMD） |
 | [cli/parameters.md](cli/parameters.md) | **全部命令的可选参数**（含默认值与说明） |
 | [cli/params-json.md](cli/params-json.md) | `--params-json` 文件字段、默认值与示例 |
@@ -108,8 +109,8 @@ python cli.py
 
 | 变量 | 说明 |
 |------|------|
-| `OPENAI_API_KEY` | autoresearch API Key（可用 `--api-key` 替代） |
-| `OPENAI_BASE_URL` | API Base，如 `https://api.deepseek.com/v1` |
+| `OPENAI_API_KEY` | LLM API Key（可留空；本地模型见 [LOCAL_LLM.md](LOCAL_LLM.md)） |
+| `OPENAI_BASE_URL` | API Base，如 `https://api.deepseek.com/v1` 或 `http://127.0.0.1:8000/v1` |
 | `OPENAI_SSL_VERIFY` | 设为 `false` 跳过 SSL 校验 |
 | `PU_PARAM_LLM_TIMEOUT` | LLM HTTP 超时（秒），默认 `180` |
 | `PU_PARAM_LLM_MODEL` | PU autoresearch 模型，默认 `gpt-4o-mini` |
