@@ -6,7 +6,9 @@ from app.cli.helpers import (
     add_common_args,
     add_dataset_type_arg,
     add_rate_arg,
+    add_split_path_args,
     add_timeout_args,
+    cli_split_paths_from_args,
     create_flask_app,
     emit_result,
     fail,
@@ -15,6 +17,7 @@ from app.cli.helpers import (
     parse_timeout_seconds,
     wait_autoresearch,
 )
+from app.services.data_core.shared.dataset_paths import resolve_split_paths
 from app.services.data_core.pu.autoresearch import (
     get_autoresearch_status,
     request_autoresearch_stop,
@@ -41,6 +44,16 @@ def cmd_train(args) -> None:
     rate = parse_positive_rate(args.rate)
     timeout = parse_timeout_seconds(args.timeout_seconds, args.timeout_minutes)
     pu_params = _pu_params(args)
+    train_path, test_path = cli_split_paths_from_args(args)
+    session_paths = {}
+    if args.dataset == 'split':
+        resolved_train, resolved_test = resolve_split_paths(
+            ctx.project_root,
+            train_path=train_path,
+            test_path=test_path,
+            use_session=False,
+        )
+        session_paths = {'train_path': resolved_train, 'test_path': resolved_test}
 
     try:
         result = execute_pu_model_training(
@@ -51,6 +64,8 @@ def cmd_train(args) -> None:
             pu_params=pu_params,
             num_boost_round=args.num_boost_round,
             timeout_seconds=timeout,
+            train_path=train_path,
+            test_path=test_path,
         )
     except PUTrainTimeoutError as exc:
         fail(str(exc))
@@ -60,6 +75,7 @@ def cmd_train(args) -> None:
         estimated_positive_rate=rate,
         label_col=label_col,
         dataset_type=args.dataset,
+        **session_paths,
     ))
     emit_result(result, json_output=ctx.json_output)
 
@@ -72,6 +88,16 @@ def cmd_autoresearch_start(args) -> None:
     rate = parse_positive_rate(args.rate)
     timeout = parse_timeout_seconds(args.timeout_seconds, args.timeout_minutes)
     pu_params = _pu_params(args)
+    train_path, test_path = cli_split_paths_from_args(args)
+    session_paths = {}
+    if args.dataset == 'split':
+        resolved_train, resolved_test = resolve_split_paths(
+            ctx.project_root,
+            train_path=train_path,
+            test_path=test_path,
+            use_session=False,
+        )
+        session_paths = {'train_path': resolved_train, 'test_path': resolved_test}
 
     app = create_flask_app()
     with app.app_context():
@@ -99,6 +125,7 @@ def cmd_autoresearch_start(args) -> None:
             estimated_positive_rate=rate,
             label_col=label_col,
             dataset_type=args.dataset,
+            **session_paths,
         ))
 
         if args.wait:
@@ -130,6 +157,7 @@ def register_subcommands(subparsers) -> None:
     train_parser = pu_sub.add_parser('train', help='单次 PU 训练')
     add_common_args(train_parser)
     add_dataset_type_arg(train_parser)
+    add_split_path_args(train_parser)
     add_rate_arg(train_parser)
     add_timeout_args(train_parser)
     train_parser.add_argument('--params-json', default=None, help='PU 超参 JSON 文件')
@@ -142,6 +170,7 @@ def register_subcommands(subparsers) -> None:
     start_parser = ar_sub.add_parser('start', help='启动 autoresearch')
     add_common_args(start_parser)
     add_dataset_type_arg(start_parser)
+    add_split_path_args(start_parser)
     add_rate_arg(start_parser)
     add_timeout_args(start_parser)
     start_parser.add_argument('--api-key', default=None)

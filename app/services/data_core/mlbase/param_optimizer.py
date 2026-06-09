@@ -107,10 +107,10 @@ def resolve_variant_feature_names(
             raise FileNotFoundError('未找到训练数据')
         train_df = loader._load_csv(file_path)
     else:
-        train_path = os.path.join(upload_dir, 'train_dataset.csv')
-        if not os.path.isfile(train_path):
-            raise FileNotFoundError('未找到训练集')
-        train_df = loader._load_csv(train_path)
+        from app.services.data_core.shared.dataset_paths import resolve_train_path
+
+        resolved = resolve_train_path(project_root)
+        train_df = loader._load_csv(resolved)
 
     if variant == 'full_features':
         return [c for c in train_df.columns if c != label_col]

@@ -77,8 +77,15 @@ def fe_output_dir(project_root: str) -> str:
     return os.path.join(results_dir(project_root), 'feature_selection')
 
 
-def load_train_csv(project_root: str, dataset_type: str, label_col: str):
+def load_train_csv(
+    project_root: str,
+    dataset_type: str,
+    label_col: str,
+    *,
+    train_path: Optional[str] = None,
+):
     from app.services.data_core.shared.data_loader import DataLoader
+    from app.services.data_core.shared.dataset_paths import resolve_train_path
 
     loader = DataLoader(label_col=label_col)
     upload = uploads_dir(project_root)
@@ -89,10 +96,8 @@ def load_train_csv(project_root: str, dataset_type: str, label_col: str):
         if not os.path.exists(file_path):
             raise FileNotFoundError('未找到 full_dataset.csv 或 data/train.csv')
         return loader._load_csv(file_path)
-    train_path = os.path.join(upload, 'train_dataset.csv')
-    if not os.path.exists(train_path):
-        raise FileNotFoundError('未找到 train_dataset.csv，请先运行 dataset split')
-    return loader._load_csv(train_path)
+    resolved = resolve_train_path(project_root, train_path=train_path)
+    return loader._load_csv(resolved)
 
 
 def create_flask_app():
@@ -163,6 +168,29 @@ def add_dataset_type_arg(parser, default: str = 'split') -> None:
         default=default,
         help='数据集模式：split=train/test 分割；full=全量再划分',
     )
+
+
+def add_split_path_args(parser) -> None:
+    parser.add_argument(
+        '--train-path',
+        default=None,
+        help='训练集 CSV（仅 split 模式；默认 data/uploads/train_dataset.csv）',
+    )
+    parser.add_argument(
+        '--test-path',
+        default=None,
+        help='测试集 CSV（仅 split 模式；默认 data/uploads/test_dataset.csv）',
+    )
+
+
+def cli_split_paths_from_args(args) -> tuple:
+    """从 CLI args 取出 train/test 路径；与 --dataset full 互斥。"""
+    train_path = getattr(args, 'train_path', None)
+    test_path = getattr(args, 'test_path', None)
+    dataset_type = getattr(args, 'dataset', None)
+    if (train_path or test_path) and dataset_type == 'full':
+        fail('--train-path / --test-path 仅适用于 --dataset split')
+    return train_path, test_path
 
 
 def add_rate_arg(parser, default: float = 10.0) -> None:

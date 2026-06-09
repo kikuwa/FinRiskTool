@@ -23,8 +23,12 @@ def load_and_preprocess_pu_data(
     label_col: str = 'label',
     dataset_type: str = 'split',
     stop_event: Any = None,
+    train_path: Optional[str] = None,
+    test_path: Optional[str] = None,
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """在训练子进程内加载并预处理数据（便于停止时 taskkill 整个子进程）。"""
+    from app.services.data_core.shared.dataset_paths import resolve_split_paths
+
     _check_stop_event(stop_event)
     upload_dir = os.path.join(project_root, 'data', 'uploads')
     loader = DataLoader(label_col=label_col)
@@ -39,11 +43,10 @@ def load_and_preprocess_pu_data(
                 raise FileNotFoundError('未找到数据集，请先上传')
         train_df, test_df = loader.load_full_dataset(file_path)
     else:
-        train_path = os.path.join(upload_dir, 'train_dataset.csv')
-        test_path = os.path.join(upload_dir, 'test_dataset.csv')
-        if not os.path.exists(train_path) or not os.path.exists(test_path):
-            raise FileNotFoundError('未找到训练集或测试集，请先上传')
-        train_df, test_df = loader.load_train_test_split(train_path, test_path)
+        train_p, test_p = resolve_split_paths(
+            project_root, train_path=train_path, test_path=test_path,
+        )
+        train_df, test_df = loader.load_train_test_split(train_p, test_p)
 
     _check_stop_event(stop_event)
     train_df = loader.preprocess_data(train_df, fit_encoders=True)
@@ -72,6 +75,8 @@ def execute_pu_model_training(
     timeout_seconds: int = None,
     save_prediction_files: bool = True,
     stop_checker: Optional[Callable[[], bool]] = None,
+    train_path: Optional[str] = None,
+    test_path: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     加载数据、运行 PU 流水线并返回与 /run_model 一致的结果结构。
@@ -90,6 +95,8 @@ def execute_pu_model_training(
         project_root=project_root,
         label_col=label_col,
         dataset_type=dataset_type,
+        train_path=train_path,
+        test_path=test_path,
         output_dir=output_dir,
         estimated_positive_rate=estimated_positive_rate,
         timeout_seconds=timeout_seconds,

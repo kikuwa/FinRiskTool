@@ -54,6 +54,8 @@
 | 选项 | 类型 | 默认 | 说明 |
 |------|------|------|------|
 | `--dataset` | `split` \| `full` | `split` | `split` 用 train/test 文件；`full` 用全量再划分 |
+| `--train-path` | 路径 | `data/uploads/train_dataset.csv` | 仅 `split`：自定义训练集 CSV |
+| `--test-path` | 路径 | `data/uploads/test_dataset.csv` | 仅 `split`：自定义测试集 CSV |
 | `--rate` | 浮点 | `10` | 预估正样本比例；`10` 表示 10% |
 | `--timeout-minutes` | 浮点 | 未设 → **10 分钟** | 训练超时（分钟） |
 | `--timeout-seconds` | 整数 | 未设 | 训练超时（秒）；优先于 minutes |
@@ -74,6 +76,8 @@ PU LLM 自动调参循环。
 | 选项 | 类型 | 默认 | 说明 |
 |------|------|------|------|
 | `--dataset` | `split` \| `full` | `split` | 数据集模式 |
+| `--train-path` | 路径 | 见 `pu train` | 仅 `split`：自定义训练集 |
+| `--test-path` | 路径 | 见 `pu train` | 仅 `split`：自定义测试集 |
 | `--rate` | 浮点 | `10` | 预估正样本比例 |
 | `--timeout-minutes` | 浮点 | 未设 → **10 分钟** | **每轮训练**超时 |
 | `--timeout-seconds` | 整数 | 未设 | 每轮训练超时（秒） |
@@ -109,6 +113,8 @@ PU LLM 自动调参循环。
 | 选项 | 类型 | 默认 | 说明 |
 |------|------|------|------|
 | `--dataset` | `split` \| `full` | `split`（或读 `pu_session.json`） | 训练数据来源 |
+| `--train-path` | 路径 | 默认或 `pu_session.json` | 仅 `split`：自定义训练集 |
+| `--test-path` | 路径 | 默认或 `pu_session.json` | 仅 `split`：`fe run` 忽略；`rfecv`/`mlbase test` 可用 |
 | `--rate` | 浮点 | `10` | 预估正样本比例（PN 构表） |
 | `--params-json` | 路径 | 无 | 特征工程超参 JSON |
 | `--project-root` | 路径 | 当前目录 | 项目根 |
@@ -155,6 +161,8 @@ RFECV 递归特征消除（全量优于 Top 时的重选流程）。
 | 选项 | 类型 | 默认 | 说明 |
 |------|------|------|------|
 | `--dataset` | `split` \| `full` | `split`（或读 session） | 训练数据 |
+| `--train-path` | 路径 | 默认或 `pu_session.json` | 仅 `split`：自定义训练集 |
+| `--test-path` | 路径 | 默认或 `pu_session.json` | 仅 `split`：本命令未使用 |
 | `--recall-target` | 浮点 | `0.5` | 验证集召回下限（阈值搜索） |
 | `--params-json` | 路径 | 无 | MLBase 超参 JSON |
 | `--project-root` | 路径 | 当前目录 | 项目根 |
@@ -175,6 +183,8 @@ RFECV 递归特征消除（全量优于 Top 时的重选流程）。
 |------|------|------|------|
 | `--variant` | `top_features` \| `full_features` | `top_features` | 特征方案 |
 | `--dataset` | `split` \| `full` | `split`（或读 session） | 训练数据 |
+| `--train-path` | 路径 | 默认或 `pu_session.json` | 仅 `split`：自定义训练集 |
+| `--test-path` | 路径 | 默认或 `pu_session.json` | 仅 `split`：本命令未使用 |
 | `--recall-target` | 浮点 | `0.5` | 召回下限 |
 | `--timeout-minutes` | 浮点 | 未设 → **20 分钟** | 训练超时 |
 | `--timeout-seconds` | 整数 | 未设 | 训练超时（秒） |
@@ -193,6 +203,8 @@ RFECV 递归特征消除（全量优于 Top 时的重选流程）。
 |------|------|------|------|
 | `--variant` | `top_features` \| `full_features` | `top_features` | 使用哪套 comparison 结果 |
 | `--dataset` | `split` \| `full` | `split` | **仅支持 split**（需 test CSV） |
+| `--train-path` | 路径 | 默认或 `pu_session.json` | 仅 `split`：自定义训练集 |
+| `--test-path` | 路径 | 默认或 `pu_session.json` | 仅 `split`：自定义测试集 |
 | `--recall-target` | 浮点 | `0.5` | 写入 params-json 时覆盖 |
 | `--params-json` | 路径 | 无 | 训练超参（影响 refit 模型） |
 | `--project-root` | 路径 | 当前目录 | 项目根 |

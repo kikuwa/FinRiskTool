@@ -18,7 +18,15 @@ from app.services.data_core.feature_selection.pipeline import (
 RFECV_META_JSON = 'rfecv_meta.json'
 
 
-def _load_train_df(project_root: str, dataset_type: str, label_col: str) -> pd.DataFrame:
+def _load_train_df(
+    project_root: str,
+    dataset_type: str,
+    label_col: str,
+    *,
+    train_path: Optional[str] = None,
+) -> pd.DataFrame:
+    from app.services.data_core.shared.dataset_paths import resolve_train_path
+
     upload_dir = os.path.join(project_root, 'data', 'uploads')
     loader = DataLoader(label_col=label_col)
     if dataset_type == 'full':
@@ -29,10 +37,8 @@ def _load_train_df(project_root: str, dataset_type: str, label_col: str) -> pd.D
             raise FileNotFoundError('未找到训练数据')
         train_df = loader._load_csv(file_path)
     else:
-        train_path = os.path.join(upload_dir, 'train_dataset.csv')
-        if not os.path.exists(train_path):
-            raise FileNotFoundError('未找到训练集，请先完成数据分割')
-        train_df = loader._load_csv(train_path)
+        resolved = resolve_train_path(project_root, train_path=train_path)
+        train_df = loader._load_csv(resolved)
     loader.validate_data(train_df)
     return train_df
 
@@ -42,6 +48,7 @@ def run_rfecv_reselection(
     *,
     label_col: str = 'label',
     dataset_type: str = 'split',
+    train_path: Optional[str] = None,
     output_dir: Optional[str] = None,
     cv_folds: int = 3,
     min_features_to_select: int = 5,
@@ -70,7 +77,9 @@ def run_rfecv_reselection(
         raise ValueError('候选特征列表为空')
 
     _log(f'加载训练数据 (dataset_type={dataset_type})…')
-    train_df = _load_train_df(project_root, dataset_type, label_col)
+    train_df = _load_train_df(
+        project_root, dataset_type, label_col, train_path=train_path,
+    )
     use_cols = [c for c in feature_cols if c in train_df.columns]
     if len(use_cols) < min_features_to_select:
         raise ValueError(f'可用特征不足 {min_features_to_select} 个')

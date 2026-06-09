@@ -5,7 +5,9 @@ from app.cli.context import CliContext
 from app.cli.helpers import (
     add_common_args,
     add_dataset_type_arg,
+    add_split_path_args,
     add_timeout_args,
+    cli_split_paths_from_args,
     create_flask_app,
     emit_result,
     fail,
@@ -54,6 +56,7 @@ def cmd_compare(args) -> None:
     _require_top_features(ctx.project_root)
     label_col = ctx.resolved_label_col()
     dataset_type = args.dataset or resolve_dataset_type_from_pu_session(ctx.project_root, 'split')
+    train_path, test_path = cli_split_paths_from_args(args)
     ml_params = _ml_params(args)
     output_dir = fe_output_dir(ctx.project_root)
 
@@ -61,6 +64,7 @@ def cmd_compare(args) -> None:
         ctx.project_root,
         label_col=label_col,
         dataset_type=dataset_type,
+        train_path=train_path,
         output_dir=output_dir,
         **ml_params,
     )
@@ -73,6 +77,7 @@ def cmd_train(args) -> None:
         _require_top_features(ctx.project_root)
     label_col = ctx.resolved_label_col()
     dataset_type = args.dataset or resolve_dataset_type_from_pu_session(ctx.project_root, 'split')
+    train_path, _ = cli_split_paths_from_args(args)
     timeout = parse_timeout_seconds(
         args.timeout_seconds, args.timeout_minutes, default_seconds=ML_RUN_TIMEOUT_SECONDS,
     )
@@ -84,6 +89,7 @@ def cmd_train(args) -> None:
             variant=args.variant,
             label_col=label_col,
             dataset_type=dataset_type,
+            train_path=train_path,
             ml_params=ml_params,
             timeout_seconds=timeout,
         )
@@ -97,6 +103,7 @@ def cmd_test(args) -> None:
     ctx = CliContext(args.project_root, args.label_col, args.json)
     label_col = ctx.resolved_label_col()
     dataset_type = args.dataset or resolve_dataset_type_from_pu_session(ctx.project_root, 'split')
+    train_path, test_path = cli_split_paths_from_args(args)
     comparison_path = os.path.join(fe_output_dir(ctx.project_root), MLBASE_COMPARISON_JSON)
     if not os.path.isfile(comparison_path):
         fail('未找到 mlbase_comparison.json，请先运行 mlbase compare')
@@ -107,6 +114,8 @@ def cmd_test(args) -> None:
         variant=args.variant,
         label_col=label_col,
         dataset_type=dataset_type,
+        train_path=train_path,
+        test_path=test_path,
         reg_alpha=ml_params['reg_alpha'],
         reg_lambda=ml_params['reg_lambda'],
         learning_rate=ml_params['learning_rate'],
@@ -180,6 +189,7 @@ def register_subcommands(subparsers) -> None:
     compare_parser = ml_sub.add_parser('compare', help='全量 vs Top 特征对比')
     add_common_args(compare_parser)
     add_dataset_type_arg(compare_parser)
+    add_split_path_args(compare_parser)
     compare_parser.add_argument('--recall-target', type=float, default=None)
     compare_parser.add_argument('--params-json', default=None)
     compare_parser.set_defaults(handler=cmd_compare)
@@ -187,6 +197,7 @@ def register_subcommands(subparsers) -> None:
     train_parser = ml_sub.add_parser('train', help='单 variant 训练')
     add_common_args(train_parser)
     add_dataset_type_arg(train_parser)
+    add_split_path_args(train_parser)
     add_timeout_args(train_parser)
     train_parser.add_argument(
         '--variant',
@@ -200,6 +211,7 @@ def register_subcommands(subparsers) -> None:
     test_parser = ml_sub.add_parser('test', help='Test 集评估')
     add_common_args(test_parser)
     add_dataset_type_arg(test_parser)
+    add_split_path_args(test_parser)
     test_parser.add_argument(
         '--variant',
         choices=('top_features', 'full_features'),
@@ -215,6 +227,7 @@ def register_subcommands(subparsers) -> None:
     start_parser = ar_sub.add_parser('start', help='启动 autoresearch')
     add_common_args(start_parser)
     add_dataset_type_arg(start_parser)
+    add_split_path_args(start_parser)
     add_timeout_args(start_parser)
     start_parser.add_argument('--api-key', default=None)
     start_parser.add_argument('--base-url', default=None)

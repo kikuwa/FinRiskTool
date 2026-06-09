@@ -25,6 +25,7 @@ def run_mlbase_comparison(
     *,
     label_col: str = 'label',
     dataset_type: str = 'split',
+    train_path: Optional[str] = None,
     recall_target: float = DEFAULT_RECALL_TARGET,
     reg_alpha: float = DEFAULT_REG_ALPHA,
     reg_lambda: float = DEFAULT_REG_LAMBDA,
@@ -50,10 +51,10 @@ def run_mlbase_comparison(
             raise FileNotFoundError('未找到训练数据')
         train_df = loader._load_csv(file_path)
     else:
-        train_path = os.path.join(upload_dir, 'train_dataset.csv')
-        if not os.path.exists(train_path):
-            raise FileNotFoundError('未找到训练集')
-        train_df = loader._load_csv(train_path)
+        from app.services.data_core.shared.dataset_paths import resolve_train_path
+
+        resolved = resolve_train_path(project_root, train_path=train_path)
+        train_df = loader._load_csv(resolved)
 
     loader.validate_data(train_df)
     all_features = [c for c in train_df.columns if c != label_col]

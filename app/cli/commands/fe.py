@@ -8,6 +8,8 @@ from app.cli.helpers import (
     add_common_args,
     add_dataset_type_arg,
     add_rate_arg,
+    add_split_path_args,
+    cli_split_paths_from_args,
     emit_result,
     fail,
     fe_output_dir,
@@ -38,12 +40,15 @@ def cmd_run(args) -> None:
     label_col = ctx.resolved_label_col()
     rate = parse_positive_rate(args.rate)
     dataset_type = args.dataset or resolve_dataset_type_from_pu_session(ctx.project_root, 'split')
+    train_path, _ = cli_split_paths_from_args(args)
     pu_pred = os.path.join(pu_output_dir(ctx.project_root), 'train_predictions.csv')
     if not os.path.isfile(pu_pred):
         fail('未找到 train_predictions.csv，请先运行 pu train')
 
     loader = DataLoader(label_col=label_col)
-    train_df = load_train_csv(ctx.project_root, dataset_type, label_col)
+    train_df = load_train_csv(
+        ctx.project_root, dataset_type, label_col, train_path=train_path,
+    )
     loader.validate_data(train_df)
 
     output_dir = fe_output_dir(ctx.project_root)
@@ -105,10 +110,12 @@ def cmd_rfecv(args) -> None:
     def log_fn(msg, level='info'):
         print(f'[rfecv] {msg}')
 
+    train_path, _ = cli_split_paths_from_args(args)
     result = run_rfecv_reselection(
         ctx.project_root,
         label_col=label_col,
         dataset_type=dataset_type,
+        train_path=train_path,
         output_dir=output_dir,
         log_fn=log_fn,
     )
@@ -122,6 +129,7 @@ def register_subcommands(subparsers) -> None:
     run_parser = fe_sub.add_parser('run', help='运行特征筛选流水线')
     add_common_args(run_parser)
     add_dataset_type_arg(run_parser)
+    add_split_path_args(run_parser)
     add_rate_arg(run_parser)
     run_parser.add_argument('--params-json', default=None, help='特征工程超参 JSON')
     run_parser.set_defaults(handler=cmd_run)
@@ -136,4 +144,5 @@ def register_subcommands(subparsers) -> None:
     rfecv_parser = fe_sub.add_parser('rfecv', help='RFECV 重选特征')
     add_common_args(rfecv_parser)
     add_dataset_type_arg(rfecv_parser)
+    add_split_path_args(rfecv_parser)
     rfecv_parser.set_defaults(handler=cmd_rfecv)

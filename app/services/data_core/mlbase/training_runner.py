@@ -139,7 +139,15 @@ def _terminate_process_tree(proc: mp.Process) -> None:
         proc.join()
 
 
-def _load_train_df(project_root: str, label_col: str, dataset_type: str) -> pd.DataFrame:
+def _load_train_df(
+    project_root: str,
+    label_col: str,
+    dataset_type: str,
+    *,
+    train_path: Optional[str] = None,
+) -> pd.DataFrame:
+    from app.services.data_core.shared.dataset_paths import resolve_train_path
+
     upload_dir = os.path.join(project_root, 'data', 'uploads')
     loader = DataLoader(label_col=label_col)
     if dataset_type == 'full':
@@ -149,10 +157,8 @@ def _load_train_df(project_root: str, label_col: str, dataset_type: str) -> pd.D
         if not os.path.exists(file_path):
             raise FileNotFoundError('未找到训练数据')
         return loader._load_csv(file_path)
-    train_path = os.path.join(upload_dir, 'train_dataset.csv')
-    if not os.path.exists(train_path):
-        raise FileNotFoundError('未找到训练集')
-    return loader._load_csv(train_path)
+    resolved = resolve_train_path(project_root, train_path=train_path)
+    return loader._load_csv(resolved)
 
 
 def _resolve_feature_cols(
@@ -180,12 +186,15 @@ def load_mlbase_training_data(
     variant: str,
     label_col: str = 'label',
     dataset_type: str = 'split',
+    train_path: Optional[str] = None,
     stop_event: Any = None,
 ) -> Tuple[pd.DataFrame, List[str]]:
     """在训练子进程内加载数据并解析特征列（便于停止时 taskkill 整个子进程）。"""
     _check_stop_event(stop_event)
     output_dir = os.path.join(project_root, 'data', 'results', 'feature_selection')
-    train_df = _load_train_df(project_root, label_col, dataset_type)
+    train_df = _load_train_df(
+        project_root, label_col, dataset_type, train_path=train_path,
+    )
     _check_stop_event(stop_event)
     loader = DataLoader(label_col=label_col)
     loader.validate_data(train_df)
@@ -208,11 +217,13 @@ def _mlbase_worker(kwargs: dict, result_queue: mp.Queue) -> None:
             variant = kwargs.pop('variant')
             label_col = kwargs.get('label_col', 'label')
             dataset_type = kwargs.pop('dataset_type', 'split')
+            train_path = kwargs.pop('train_path', None)
             train_df, feature_cols = load_mlbase_training_data(
                 project_root,
                 variant=variant,
                 label_col=label_col,
                 dataset_type=dataset_type,
+                train_path=train_path,
                 stop_event=stop_event,
             )
             kwargs['train_df'] = train_df
@@ -374,6 +385,7 @@ def execute_mlbase_variant_training(
     variant: str,
     label_col: str = 'label',
     dataset_type: str = 'split',
+    train_path: Optional[str] = None,
     ml_params: Dict[str, Any] = None,
     timeout_seconds: int = None,
     stop_checker: Optional[Callable[[], bool]] = None,
@@ -394,6 +406,7 @@ def execute_mlbase_variant_training(
         project_root=project_root,
         label_col=label_col,
         dataset_type=dataset_type,
+        train_path=train_path,
         recall_target=float(ml_params.get('recall_target', 0.5)),
         reg_alpha=float(ml_params.get('reg_alpha', 0.1)),
         reg_lambda=float(ml_params.get('reg_lambda', 0.1)),

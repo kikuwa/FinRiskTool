@@ -58,8 +58,14 @@ python cli.py pu autoresearch start --help
 将 `LABEL` 换成你的标签列名（如 `RevolverStatus`）：
 
 ```bash
+# 方式 A：系统切分全量数据
 python cli.py dataset split --label-col LABEL --test-size 0.3
 python cli.py pu train --dataset split --label-col LABEL --rate 10 --timeout-minutes 20
+
+# 方式 B：自定义训练/测试集路径（可跳过 dataset split）
+python cli.py pu train --dataset split --label-col LABEL \
+  --train-path /path/to/train.csv --test-path /path/to/test.csv --rate 10
+
 python cli.py fe run --dataset split --label-col LABEL --rate 10
 python cli.py fe confirm --default
 python cli.py mlbase compare --dataset split --recall-target 0.6

@@ -40,22 +40,22 @@ def _load_train_test_frames(
     project_root: str,
     label_col: str,
     dataset_type: str,
+    *,
+    train_path: Optional[str] = None,
+    test_path: Optional[str] = None,
 ) -> tuple:
-    upload_dir = os.path.join(project_root, 'data', 'uploads')
+    from app.services.data_core.shared.dataset_paths import resolve_split_paths
+
     loader = DataLoader(label_col=label_col)
 
     if dataset_type == 'full':
-        raise ValueError('Test 集评估仅支持 split 模式（需 train_dataset.csv 与 test_dataset.csv）')
+        raise ValueError('Test 集评估仅支持 split 模式（需训练集与测试集 CSV）')
 
-    train_path = os.path.join(upload_dir, 'train_dataset.csv')
-    test_path = os.path.join(upload_dir, 'test_dataset.csv')
-    if not os.path.isfile(train_path):
-        raise FileNotFoundError('未找到训练集 train_dataset.csv')
-    if not os.path.isfile(test_path):
-        raise FileNotFoundError('未找到测试集 test_dataset.csv')
-
-    train_df = loader._load_csv(train_path)
-    test_df = loader._load_csv(test_path)
+    train_p, test_p = resolve_split_paths(
+        project_root, train_path=train_path, test_path=test_path,
+    )
+    train_df = loader._load_csv(train_p)
+    test_df = loader._load_csv(test_p)
     loader.validate_data(train_df)
     loader.validate_data(test_df)
     if set(train_df.columns) != set(test_df.columns):
@@ -136,6 +136,8 @@ def run_mlbase_test_evaluation(
     variant: str = 'top_features',
     label_col: str = 'label',
     dataset_type: str = 'split',
+    train_path: Optional[str] = None,
+    test_path: Optional[str] = None,
     output_dir: Optional[str] = None,
     reg_alpha: float = DEFAULT_REG_ALPHA,
     reg_lambda: float = DEFAULT_REG_LAMBDA,
@@ -171,7 +173,13 @@ def run_mlbase_test_evaluation(
     threshold = float(exp.get('val_threshold', 0.5))
     recall_target = float(exp.get('recall_target', DEFAULT_RECALL_TARGET))
 
-    train_df, test_df = _load_train_test_frames(project_root, label_col, dataset_type)
+    train_df, test_df = _load_train_test_frames(
+        project_root,
+        label_col,
+        dataset_type,
+        train_path=train_path,
+        test_path=test_path,
+    )
 
     model, loader, use_cols, params, class_weight = _fit_mlbase_on_full_train(
         train_df,
