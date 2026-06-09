@@ -156,13 +156,11 @@ RFECV 递归特征消除（全量优于 Top 时的重选流程）。
 
 ## `mlbase compare`
 
-全量特征 vs `top_features.csv` 对比训练。
+全量特征 vs `top_features.csv` 对比训练（仅在训练集内划分验证集，不使用 hold-out test）。
 
 | 选项 | 类型 | 默认 | 说明 |
 |------|------|------|------|
-| `--dataset` | `split` \| `full` | `split`（或读 session） | 训练数据 |
-| `--train-path` | 路径 | 默认或 `pu_session.json` | 仅 `split`：自定义训练集 |
-| `--test-path` | 路径 | 默认或 `pu_session.json` | 仅 `split`：本命令未使用 |
+| `--train-path` | 路径 | `data/uploads/train_dataset.csv` 或 `pu_session.json` | 训练集 CSV |
 | `--recall-target` | 浮点 | `0.5` | 验证集召回下限（阈值搜索） |
 | `--params-json` | 路径 | 无 | MLBase 超参 JSON |
 | `--project-root` | 路径 | 当前目录 | 项目根 |
@@ -177,14 +175,12 @@ RFECV 递归特征消除（全量优于 Top 时的重选流程）。
 
 ## `mlbase train`
 
-单 variant 单次训练。
+单 variant 单次训练（仅在训练集内划分验证集，不使用 hold-out test）。
 
 | 选项 | 类型 | 默认 | 说明 |
 |------|------|------|------|
 | `--variant` | `top_features` \| `full_features` | `top_features` | 特征方案 |
-| `--dataset` | `split` \| `full` | `split`（或读 session） | 训练数据 |
-| `--train-path` | 路径 | 默认或 `pu_session.json` | 仅 `split`：自定义训练集 |
-| `--test-path` | 路径 | 默认或 `pu_session.json` | 仅 `split`：本命令未使用 |
+| `--train-path` | 路径 | `data/uploads/train_dataset.csv` 或 `pu_session.json` | 训练集 CSV |
 | `--recall-target` | 浮点 | `0.5` | 召回下限 |
 | `--timeout-minutes` | 浮点 | 未设 → **20 分钟** | 训练超时 |
 | `--timeout-seconds` | 整数 | 未设 | 训练超时（秒） |
@@ -202,9 +198,8 @@ RFECV 递归特征消除（全量优于 Top 时的重选流程）。
 | 选项 | 类型 | 默认 | 说明 |
 |------|------|------|------|
 | `--variant` | `top_features` \| `full_features` | `top_features` | 使用哪套 comparison 结果 |
-| `--dataset` | `split` \| `full` | `split` | **仅支持 split**（需 test CSV） |
-| `--train-path` | 路径 | 默认或 `pu_session.json` | 仅 `split`：自定义训练集 |
-| `--test-path` | 路径 | 默认或 `pu_session.json` | 仅 `split`：自定义测试集 |
+| `--train-path` | 路径 | 默认或 `pu_session.json` | hold-out 训练集 |
+| `--test-path` | 路径 | 默认或 `pu_session.json` | hold-out 测试集 |
 | `--recall-target` | 浮点 | `0.5` | 写入 params-json 时覆盖 |
 | `--params-json` | 路径 | 无 | 训练超参（影响 refit 模型） |
 | `--project-root` | 路径 | 当前目录 | 项目根 |
@@ -222,7 +217,7 @@ MLBase LLM 自动调参。
 | 选项 | 类型 | 默认 | 说明 |
 |------|------|------|------|
 | `--variant` | `top_features` \| `full_features` | `top_features` | 固定特征方案（autoresearch 不可切换） |
-| `--dataset` | `split` \| `full` | `split`（或读 session） | 训练数据 |
+| `--train-path` | 路径 | 默认或 `pu_session.json` | 训练集 CSV |
 | `--recall-target` | 浮点 | `0.5` | 用户固定召回目标 |
 | `--timeout-minutes` | 浮点 | 未设 → **20 分钟** | 每轮训练超时 |
 | `--timeout-seconds` | 整数 | 未设 | 每轮训练超时（秒） |

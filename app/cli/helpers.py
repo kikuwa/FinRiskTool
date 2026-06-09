@@ -170,12 +170,26 @@ def add_dataset_type_arg(parser, default: str = 'split') -> None:
     )
 
 
-def add_split_path_args(parser) -> None:
+def add_train_path_arg(parser) -> None:
     parser.add_argument(
         '--train-path',
         default=None,
-        help='训练集 CSV（仅 split 模式；默认 data/uploads/train_dataset.csv）',
+        help='训练集 CSV（默认 data/uploads/train_dataset.csv 或 pu_session.json）',
     )
+
+
+def add_holdout_path_args(parser) -> None:
+    """hold-out 评估：需同时指定训练集与测试集。"""
+    add_train_path_arg(parser)
+    parser.add_argument(
+        '--test-path',
+        default=None,
+        help='测试集 CSV（默认 data/uploads/test_dataset.csv 或 pu_session.json）',
+    )
+
+
+def add_split_path_args(parser) -> None:
+    add_train_path_arg(parser)
     parser.add_argument(
         '--test-path',
         default=None,

@@ -68,8 +68,8 @@ python cli.py pu train --dataset split --label-col LABEL \
 
 python cli.py fe run --dataset split --label-col LABEL --rate 10
 python cli.py fe confirm --default
-python cli.py mlbase compare --dataset split --recall-target 0.6
-python cli.py mlbase test --variant top_features --dataset split
+python cli.py mlbase compare --recall-target 0.6
+python cli.py mlbase test --variant top_features
 ```
 
 加 `--json` 可输出结构化 JSON。

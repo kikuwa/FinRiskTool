@@ -72,8 +72,8 @@ python cli.py pu train \
 python cli.py fe run --dataset split --label-col "$LABEL" --rate 10
 python cli.py fe confirm --default
 
-python cli.py mlbase compare --dataset split --recall-target 0.6
-python cli.py mlbase test --variant top_features --dataset split
+python cli.py mlbase compare --recall-target 0.6
+python cli.py mlbase test --variant top_features
 ```
 
 ### PowerShell (Windows)
@@ -93,8 +93,8 @@ python cli.py pu train `
 python cli.py fe run --dataset split --label-col $LABEL --rate 10
 python cli.py fe confirm --default
 
-python cli.py mlbase compare --dataset split --recall-target 0.6
-python cli.py mlbase test --variant top_features --dataset split
+python cli.py mlbase compare --recall-target 0.6
+python cli.py mlbase test --variant top_features
 ```
 
 ### CMD (Windows)
@@ -106,8 +106,8 @@ python cli.py dataset split --label-col %LABEL% --test-size 0.3
 python cli.py pu train --dataset split --label-col %LABEL% --rate 10 --timeout-minutes 20
 python cli.py fe run --dataset split --label-col %LABEL% --rate 10
 python cli.py fe confirm --default
-python cli.py mlbase compare --dataset split --recall-target 0.6
-python cli.py mlbase test --variant top_features --dataset split
+python cli.py mlbase compare --recall-target 0.6
+python cli.py mlbase test --variant top_features
 ```
 
 ---
