@@ -26,7 +26,7 @@
 
 | 选项 | 类型 | 默认 | 说明 |
 |------|------|------|------|
-| `--input` | 路径 | `data/uploads/full_dataset.csv` | 全量 CSV 输入 |
+| `--input` | 路径 | 读 `dataset_preferences.json`，否则 `data/uploads/full_dataset.csv` | 全量 CSV 输入；会写入 preferences |
 | `--test-size` | 浮点 | `0.3` | 测试集比例 (0, 1) |
 | `--project-root` | 路径 | 当前目录 | 项目根 |
 | `--label-col` | 字符串 | 见全局 | 标签列 |
@@ -40,7 +40,7 @@
 
 | 选项 | 类型 | 默认 | 说明 |
 |------|------|------|------|
-| `--input` | 路径 | `data/uploads/full_dataset.csv` | 分析用 CSV |
+| `--input` | 路径 | 读 `dataset_preferences.json`，否则 `data/uploads/full_dataset.csv` | 分析用 CSV；会写入 preferences 供后续 `pu train --dataset full` 使用 |
 | `--project-root` | 路径 | 当前目录 | 项目根 |
 | `--label-col` | 字符串 | 见全局 | 标签列 |
 | `--json` | 开关 | 关 | JSON 输出 |
@@ -54,6 +54,7 @@
 | 选项 | 类型 | 默认 | 说明 |
 |------|------|------|------|
 | `--dataset` | `split` \| `full` | `split` | `split` 用 train/test 文件；`full` 用全量再划分 |
+| `--input` | 路径 | 读 `dataset_preferences.json`，否则 `data/uploads/full_dataset.csv` | 仅 `full`：全量 CSV |
 | `--train-path` | 路径 | `data/uploads/train_dataset.csv` | 仅 `split`：自定义训练集 CSV |
 | `--test-path` | 路径 | `data/uploads/test_dataset.csv` | 仅 `split`：自定义测试集 CSV |
 | `--rate` | 浮点 | `10` | 预估正样本比例；`10` 表示 10% |

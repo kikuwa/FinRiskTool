@@ -85,16 +85,14 @@ def load_train_csv(
     train_path: Optional[str] = None,
 ):
     from app.services.data_core.shared.data_loader import DataLoader
-    from app.services.data_core.shared.dataset_paths import resolve_train_path
+    from app.services.data_core.shared.dataset_paths import (
+        resolve_full_dataset_path,
+        resolve_train_path,
+    )
 
     loader = DataLoader(label_col=label_col)
-    upload = uploads_dir(project_root)
     if dataset_type == 'full':
-        file_path = os.path.join(upload, 'full_dataset.csv')
-        if not os.path.exists(file_path):
-            file_path = os.path.join(project_root, 'data', 'train.csv')
-        if not os.path.exists(file_path):
-            raise FileNotFoundError('未找到 full_dataset.csv 或 data/train.csv')
+        file_path = resolve_full_dataset_path(project_root, full_path=train_path)
         return loader._load_csv(file_path)
     resolved = resolve_train_path(project_root, train_path=train_path)
     return loader._load_csv(resolved)
@@ -197,14 +195,41 @@ def add_split_path_args(parser) -> None:
     )
 
 
+def add_full_input_arg(parser) -> None:
+    parser.add_argument(
+        '--input',
+        default=None,
+        help='全量 CSV（仅 full 模式；默认读 dataset_preferences.json 或 data/uploads/full_dataset.csv）',
+    )
+
+
 def cli_split_paths_from_args(args) -> tuple:
-    """从 CLI args 取出 train/test 路径；与 --dataset full 互斥。"""
+    """从 CLI args 取出 split 模式的 train/test 路径。"""
     train_path = getattr(args, 'train_path', None)
     test_path = getattr(args, 'test_path', None)
+    input_path = getattr(args, 'input', None)
     dataset_type = getattr(args, 'dataset', None)
-    if (train_path or test_path) and dataset_type == 'full':
-        fail('--train-path / --test-path 仅适用于 --dataset split')
+    if dataset_type == 'full':
+        if train_path or test_path:
+            fail('--train-path / --test-path 仅适用于 --dataset split')
+    elif input_path:
+        fail('--input 仅适用于 --dataset full')
     return train_path, test_path
+
+
+def cli_full_input_from_args(args) -> Optional[str]:
+    """从 CLI args 取出 full 模式的全量 CSV 路径（可为 None，由 preferences 解析）。"""
+    train_path = getattr(args, 'train_path', None)
+    test_path = getattr(args, 'test_path', None)
+    input_path = getattr(args, 'input', None)
+    dataset_type = getattr(args, 'dataset', None)
+    if dataset_type != 'full':
+        if input_path:
+            fail('--input 仅适用于 --dataset full')
+        return None
+    if train_path or test_path:
+        fail('--train-path / --test-path 仅适用于 --dataset split')
+    return input_path
 
 
 def add_rate_arg(parser, default: float = 10.0) -> None:

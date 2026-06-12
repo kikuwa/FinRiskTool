@@ -25,22 +25,19 @@ def load_and_preprocess_pu_data(
     stop_event: Any = None,
     train_path: Optional[str] = None,
     test_path: Optional[str] = None,
+    full_path: Optional[str] = None,
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """在训练子进程内加载并预处理数据（便于停止时 taskkill 整个子进程）。"""
-    from app.services.data_core.shared.dataset_paths import resolve_split_paths
+    from app.services.data_core.shared.dataset_paths import (
+        resolve_full_dataset_path,
+        resolve_split_paths,
+    )
 
     _check_stop_event(stop_event)
-    upload_dir = os.path.join(project_root, 'data', 'uploads')
     loader = DataLoader(label_col=label_col)
 
     if dataset_type == 'full':
-        file_path = os.path.join(upload_dir, 'full_dataset.csv')
-        if not os.path.exists(file_path):
-            default_path = os.path.join(project_root, 'data', 'train.csv')
-            if os.path.exists(default_path):
-                file_path = default_path
-            else:
-                raise FileNotFoundError('未找到数据集，请先上传')
+        file_path = resolve_full_dataset_path(project_root, full_path=full_path)
         train_df, test_df = loader.load_full_dataset(file_path)
     else:
         train_p, test_p = resolve_split_paths(
@@ -77,6 +74,7 @@ def execute_pu_model_training(
     stop_checker: Optional[Callable[[], bool]] = None,
     train_path: Optional[str] = None,
     test_path: Optional[str] = None,
+    full_path: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     加载数据、运行 PU 流水线并返回与 /run_model 一致的结果结构。
@@ -97,6 +95,7 @@ def execute_pu_model_training(
         dataset_type=dataset_type,
         train_path=train_path,
         test_path=test_path,
+        full_path=full_path,
         output_dir=output_dir,
         estimated_positive_rate=estimated_positive_rate,
         timeout_seconds=timeout_seconds,

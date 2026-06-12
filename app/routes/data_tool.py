@@ -130,12 +130,15 @@ def save_dataset_preferences(
     project_root: str,
     label_col: str = None,
     test_size=None,
+    full_dataset_path: str = None,
 ) -> dict:
     prefs = load_dataset_preferences(project_root)
     if label_col is not None and str(label_col).strip():
         prefs['label_col'] = str(label_col).strip()
     if test_size is not None:
         prefs['test_size'] = float(test_size)
+    if full_dataset_path is not None and str(full_dataset_path).strip():
+        prefs['full_dataset_path'] = os.path.abspath(str(full_dataset_path).strip())
     os.makedirs(os.path.dirname(_preferences_path(project_root)), exist_ok=True)
     with open(_preferences_path(project_root), 'w', encoding='utf-8') as f:
         json.dump(prefs, f, indent=4, ensure_ascii=False)

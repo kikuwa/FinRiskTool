@@ -5,9 +5,11 @@ from app.cli.context import CliContext
 from app.cli.helpers import (
     add_common_args,
     add_dataset_type_arg,
+    add_full_input_arg,
     add_rate_arg,
     add_split_path_args,
     add_timeout_args,
+    cli_full_input_from_args,
     cli_split_paths_from_args,
     create_flask_app,
     emit_result,
@@ -17,7 +19,11 @@ from app.cli.helpers import (
     parse_timeout_seconds,
     wait_autoresearch,
 )
-from app.services.data_core.shared.dataset_paths import resolve_split_paths
+from app.routes.data_tool import save_dataset_preferences
+from app.services.data_core.shared.dataset_paths import (
+    resolve_full_dataset_path,
+    resolve_split_paths,
+)
 from app.services.data_core.pu.autoresearch import (
     get_autoresearch_status,
     request_autoresearch_stop,
@@ -44,9 +50,21 @@ def cmd_train(args) -> None:
     rate = parse_positive_rate(args.rate)
     timeout = parse_timeout_seconds(args.timeout_seconds, args.timeout_minutes)
     pu_params = _pu_params(args)
-    train_path, test_path = cli_split_paths_from_args(args)
+    full_path = None
+    train_path, test_path = None, None
     session_paths = {}
-    if args.dataset == 'split':
+    if args.dataset == 'full':
+        full_path_arg = cli_full_input_from_args(args)
+        try:
+            full_path = resolve_full_dataset_path(
+                ctx.project_root, full_path=full_path_arg,
+            )
+        except FileNotFoundError as exc:
+            fail(str(exc))
+        if full_path_arg:
+            save_dataset_preferences(ctx.project_root, full_dataset_path=full_path)
+    else:
+        train_path, test_path = cli_split_paths_from_args(args)
         resolved_train, resolved_test = resolve_split_paths(
             ctx.project_root,
             train_path=train_path,
@@ -66,6 +84,7 @@ def cmd_train(args) -> None:
             timeout_seconds=timeout,
             train_path=train_path,
             test_path=test_path,
+            full_path=full_path,
         )
     except PUTrainTimeoutError as exc:
         fail(str(exc))
@@ -88,9 +107,21 @@ def cmd_autoresearch_start(args) -> None:
     rate = parse_positive_rate(args.rate)
     timeout = parse_timeout_seconds(args.timeout_seconds, args.timeout_minutes)
     pu_params = _pu_params(args)
-    train_path, test_path = cli_split_paths_from_args(args)
+    full_path = None
+    train_path, test_path = None, None
     session_paths = {}
-    if args.dataset == 'split':
+    if args.dataset == 'full':
+        full_path_arg = cli_full_input_from_args(args)
+        try:
+            full_path = resolve_full_dataset_path(
+                ctx.project_root, full_path=full_path_arg,
+            )
+        except FileNotFoundError as exc:
+            fail(str(exc))
+        if full_path_arg:
+            save_dataset_preferences(ctx.project_root, full_dataset_path=full_path)
+    else:
+        train_path, test_path = cli_split_paths_from_args(args)
         resolved_train, resolved_test = resolve_split_paths(
             ctx.project_root,
             train_path=train_path,
@@ -158,6 +189,7 @@ def register_subcommands(subparsers) -> None:
     add_common_args(train_parser)
     add_dataset_type_arg(train_parser)
     add_split_path_args(train_parser)
+    add_full_input_arg(train_parser)
     add_rate_arg(train_parser)
     add_timeout_args(train_parser)
     train_parser.add_argument('--params-json', default=None, help='PU 超参 JSON 文件')
@@ -171,6 +203,7 @@ def register_subcommands(subparsers) -> None:
     add_common_args(start_parser)
     add_dataset_type_arg(start_parser)
     add_split_path_args(start_parser)
+    add_full_input_arg(start_parser)
     add_rate_arg(start_parser)
     add_timeout_args(start_parser)
     start_parser.add_argument('--api-key', default=None)

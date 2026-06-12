@@ -1,6 +1,56 @@
-"""训练/测试集路径解析（split 模式，供 CLI 与训练流水线共用）。"""
+"""训练/测试集路径解析（split / full 模式，供 CLI 与训练流水线共用）。"""
+import json
 import os
 from typing import Optional, Tuple
+
+
+def default_full_dataset_path(project_root: str) -> str:
+    return os.path.join(project_root, 'data', 'uploads', 'full_dataset.csv')
+
+
+def _preferences_path(project_root: str) -> str:
+    return os.path.join(project_root, 'data', 'results', 'dataset_preferences.json')
+
+
+def _full_path_from_preferences(project_root: str) -> Optional[str]:
+    path = _preferences_path(project_root)
+    if not os.path.isfile(path):
+        return None
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            prefs = json.load(f)
+        value = prefs.get('full_dataset_path')
+        if value is not None and str(value).strip():
+            return str(value).strip()
+    except (json.JSONDecodeError, OSError):
+        pass
+    return None
+
+
+def resolve_full_dataset_path(
+    project_root: str,
+    *,
+    full_path: Optional[str] = None,
+) -> str:
+    """
+    解析 full 模式下的全量 CSV 绝对路径。
+    优先级：显式参数 > dataset_preferences.json > uploads 默认 > data/train.csv
+    """
+    if full_path is not None and str(full_path).strip():
+        path = os.path.abspath(str(full_path).strip())
+    else:
+        pref_path = _full_path_from_preferences(project_root)
+        path = os.path.abspath(pref_path) if pref_path else default_full_dataset_path(project_root)
+
+    if os.path.isfile(path):
+        return path
+
+    fallback = os.path.join(project_root, 'data', 'train.csv')
+    if os.path.isfile(fallback):
+        return os.path.abspath(fallback)
+
+    extra = f' 或 {fallback}' if path != os.path.abspath(fallback) else ''
+    raise FileNotFoundError(f'未找到全量数据集: {path}{extra}')
 
 
 def default_split_paths(project_root: str) -> Tuple[str, str]:

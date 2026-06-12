@@ -327,6 +327,7 @@ def _pu_pipeline_worker(kwargs: dict, result_queue: mp.Queue) -> None:
             dataset_type = kwargs.pop('dataset_type', 'split')
             train_path = kwargs.pop('train_path', None)
             test_path = kwargs.pop('test_path', None)
+            full_path = kwargs.pop('full_path', None)
             label_col = kwargs.get('label_col', 'label')
             train_df, test_df = load_and_preprocess_pu_data(
                 project_root=project_root,
@@ -335,6 +336,7 @@ def _pu_pipeline_worker(kwargs: dict, result_queue: mp.Queue) -> None:
                 stop_event=stop_event,
                 train_path=train_path,
                 test_path=test_path,
+                full_path=full_path,
             )
             kwargs['train_df'] = train_df
             kwargs['test_df'] = test_df

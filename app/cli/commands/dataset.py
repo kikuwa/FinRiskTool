@@ -4,8 +4,8 @@ import shutil
 
 from app.cli.context import CliContext
 from app.cli.helpers import emit_result, fail, uploads_dir
+from app.services.data_core.shared.dataset_paths import resolve_full_dataset_path
 from app.routes.data_tool import (
-    load_dataset_preferences,
     save_dataset_analysis_report,
     save_dataset_preferences,
 )
@@ -20,9 +20,10 @@ def cmd_split(args) -> None:
     upload = uploads_dir(ctx.project_root)
     data_dir = os.path.join(ctx.project_root, 'data')
 
-    input_path = args.input or os.path.join(upload, 'full_dataset.csv')
-    if not os.path.isfile(input_path):
-        fail(f'未找到输入文件: {input_path}')
+    try:
+        input_path = resolve_full_dataset_path(ctx.project_root, full_path=args.input)
+    except FileNotFoundError as exc:
+        fail(str(exc))
 
     train_out = os.path.join(upload, 'train_dataset.csv')
     test_out = os.path.join(upload, 'test_dataset.csv')
@@ -37,6 +38,7 @@ def cmd_split(args) -> None:
         ctx.project_root,
         label_col=label_col,
         test_size=args.test_size,
+        full_dataset_path=input_path,
     )
     for src, dest in (
         (train_out, os.path.join(data_dir, 'train.csv')),
@@ -59,14 +61,18 @@ def cmd_split(args) -> None:
 def cmd_analyze(args) -> None:
     ctx = CliContext(args.project_root, args.label_col, args.json)
     label_col = ctx.resolved_label_col()
-    upload = uploads_dir(ctx.project_root)
-    input_path = args.input or os.path.join(upload, 'full_dataset.csv')
-    if not os.path.isfile(input_path):
-        fail(f'未找到输入文件: {input_path}')
+    try:
+        input_path = resolve_full_dataset_path(ctx.project_root, full_path=args.input)
+    except FileNotFoundError as exc:
+        fail(str(exc))
 
     loader = DataLoader(label_col=label_col)
     df = loader._load_csv(input_path)
-    save_dataset_preferences(ctx.project_root, label_col=label_col)
+    save_dataset_preferences(
+        ctx.project_root,
+        label_col=label_col,
+        full_dataset_path=input_path,
+    )
     analysis = analyze_dataset(df, label_col=label_col)
     report_path = save_dataset_analysis_report(analysis, ctx.project_root)
     emit_result({
